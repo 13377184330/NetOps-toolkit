@@ -127,6 +127,10 @@ class DeviceOpsTab(QWidget):
         self.refresh_table()
 
     # ---------------- UI ----------------
+    def clear_config(self):
+        """主窗口切换厂商时会遍历所有 tab 调用此方法（接口契约）。
+        设备运维面板与厂商切换无关，无需动作。"""
+
     def initUI(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
