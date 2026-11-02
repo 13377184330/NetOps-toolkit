@@ -121,7 +121,7 @@ class ModernSplashScreen(QWidget):
         painter.drawEllipse(center_x - 55, center_y - 55, 110, 110)
         
         # 绘制旋转动画圈
-        pen = QPen(QColor(33, 150, 243), 3)
+        pen = QPen(QColor(0, 137, 255), 3)
         pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         
@@ -141,13 +141,13 @@ class ModernSplashScreen(QWidget):
         
         # 绘制图标
         painter.setFont(QFont("Segoe UI Emoji", 40))
-        painter.setPen(QColor(33, 150, 243))
+        painter.setPen(QColor(0, 137, 255))
         painter.drawText(center_x - 25, center_y + 18, "🔧")
     
     def _draw_title(self, painter):
         # 主标题
         painter.setFont(QFont("Microsoft YaHei UI", 26, QFont.Bold))
-        painter.setPen(QColor(25, 118, 210))
+        painter.setPen(QColor(0, 119, 230))
         
         title = "NetOps Toolkit"
         title_width = painter.fontMetrics().horizontalAdvance(title)
@@ -176,16 +176,16 @@ class ModernSplashScreen(QWidget):
         progress_width = int(bar_width * self._progress / 100)
         if progress_width > 0:
             progress_gradient = QLinearGradient(bar_x, 0, bar_x + progress_width, 0)
-            progress_gradient.setColorAt(0, QColor(33, 150, 243))
-            progress_gradient.setColorAt(0.5, QColor(59, 130, 246))
-            progress_gradient.setColorAt(1, QColor(25, 118, 210))
+            progress_gradient.setColorAt(0, QColor(0, 137, 255))
+            progress_gradient.setColorAt(0.5, QColor(35, 148, 255))
+            progress_gradient.setColorAt(1, QColor(0, 119, 230))
             
             painter.setBrush(progress_gradient)
             painter.drawRoundedRect(bar_x, bar_y, progress_width, bar_height, 3, 3)
         
         # 进度百分比
         painter.setFont(QFont("Microsoft YaHei UI", 10, QFont.Bold))
-        painter.setPen(QColor(33, 150, 243))
+        painter.setPen(QColor(0, 137, 255))
         percent_text = f"{self._progress}%"
         painter.drawText(bar_x + bar_width + 15, bar_y + 5, percent_text)
         
@@ -235,7 +235,7 @@ class ModernSplashScreen(QWidget):
         x_offset = (self.width() - sum(painter.fontMetrics().horizontalAdvance(f"• {f}") for f in features) - 40) // 2
         
         for feature in features:
-            painter.setPen(QColor(59, 130, 246))
+            painter.setPen(QColor(35, 148, 255))
             painter.drawText(x_offset, self.height() - 15, "•")
             painter.setPen(QColor(148, 163, 184))
             painter.drawText(x_offset + 10, self.height() - 15, feature)
@@ -281,12 +281,12 @@ class SplashManager:
     def start_loading(self, callback):
         def process_step():
             if self.next_step():
-                QTimer.singleShot(80, process_step)
+                QTimer.singleShot(30, process_step)
             else:
-                QTimer.singleShot(300, self.finish)
-                QTimer.singleShot(600, callback)
+                QTimer.singleShot(150, self.finish)
+                QTimer.singleShot(200, callback)
         
-        QTimer.singleShot(100, process_step)
+        QTimer.singleShot(60, process_step)
     
     def finish(self):
         self.splash.dot_timer.stop()
