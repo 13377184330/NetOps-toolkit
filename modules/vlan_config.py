@@ -107,7 +107,7 @@ class VLANConfigGenerator:
                             enable: bool = True) -> str:
         """生成STP配置"""
         config_lines = []
-        config_lines.append("stp mode {mode}\n")
+        config_lines.append(f"stp mode {mode}\n")
         config_lines.append(f"stp {'enable' if enable else 'disable'}\n")
         if priority != 32768:
             config_lines.append(f"stp priority {priority}\n")
