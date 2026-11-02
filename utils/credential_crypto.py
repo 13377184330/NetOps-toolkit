@@ -1,9 +1,9 @@
 # 设备凭据加密存储（复用 cryptography 库，不自造加密算法）
 import os
-import base64
 from cryptography.fernet import Fernet
 
-_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data", "secret.key")
+# 密钥与 settings.json 同存于 config/，并加入 .gitignore
+_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "secret.key")
 
 
 def _load_or_create_key() -> bytes:

@@ -7,14 +7,16 @@ __pycache__/
 .venv/
 venv/
 
-# 数据与密钥（不入库！）
-backend/data/netops.db
-backend/data/secret.key
-backups/
+# 敏感配置（密钥与设备清单，含加密凭据，不入库！）
+config/secret.key
+config/devices.json
 
-# Node / 前端
+# 备份与数据
+backups/
+data/*.db
+
+# Node（历史遗留，Web 方向已移除）
 node_modules/
-frontend/dist/
 
 # IDE
 .idea/
@@ -28,4 +30,3 @@ dist/
 # 系统杂项
 Thumbs.db
 .DS_Store
-# 前端锁文件保留提交

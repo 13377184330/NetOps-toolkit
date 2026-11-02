@@ -4,59 +4,21 @@
 
 ---
 
-## 🚀 Web 平台版（本项目二开方向）
+## 二开说明（Fork）
 
 > 本仓库 Fork 自 [cooltea521/NetOps-toolkit](https://gitee.com/cooltea521/NetOps-toolkit)（MIT 协议）。
-> 二开思路：**保留上游全部配置生成引擎资产，在其上新增 Web 化运维平台**——把"单机命令生成"升级为"设备管理 → 一键生成 → 批量下发 → 备份 → 基线核查"的完整闭环。
+> 二开定位：**保持上游"绿色离线桌面工具"形态不变**，补齐它没有的"真机运维"能力——上游只做配置文本生成，本仓库补上连接真机之后的闭环（设备管理 / 连通测试 / 命令执行 / 配置下发 / 配置备份）。
 
-### 架构
+### 已修复上游问题
 
-```
-NetOps-toolkit/
-├── modules/          # 上游核心：四厂商配置生成引擎（二开增强中）
-├── utils/            # 上游工具箱：备份/模板/校验/报告/网络工具
-├── data/             # 上游命令参考库
-├── gui/              # 上游 PyQt5 桌面版（保留）
-├── backend/          # 【新增】FastAPI 后端
-│   └── app/
-│       ├── api/      # 设备 CRUD / 连通测试 / 配置生成 API
-│       ├── core/     # 凭据加密存储（cryptography/Fernet）
-│       ├── models/   # SQLAlchemy 设备模型
-│       └── schemas/  # Pydantic 请求/响应
-└── frontend/         # 【新增】Vue3 + Element Plus 前端
-```
+- `modules/vlan_config.py`：STP 生成 `stp mode {mode}` 缺 f 前缀，变量不替换
+- 移除误提交的 `__pycache__`，补充 `.gitignore`
 
-### M1 已交付（v0.1.0）
-
-- **设备管理**：增删改查、模糊搜索、厂商过滤、分页
-- **凭据安全**：设备密码 Fernet 加密落库，接口永不回显
-- **连通测试**：TCP 探测 SSH 管理端口 + Banner 读取，状态自动回写
-- **VLAN 一键生成**：`POST /api/generate/vlan` 复用上游引擎生成华为配置（Access/Trunk/VLANIF/STP）
-- **Bug 修复**：`modules/vlan_config.py` STP 生成 f-string 缺失（上游 bug）
-
-### 路线图
-
-| 里程碑 | 内容 | 状态 |
-|---|---|---|
-| M1 | 设备管理 + 连通测试 + VLAN 生成 API + Web UI | ✅ |
-| M2 | Nornir/Netmiko 批量下发、五厂商模板参数化（补思科）、真机 SSH 命令执行 | ⏳ |
-| M3 | 配置备份 + Diff + 基线合规核查 + 报告导出（Excel/PDF） | ⏳ |
-| M4 | Docker 部署、AI 辅助合规建议（RWKV） | ⏳ |
-
-### 本地开发
+### 运行
 
 ```bash
-# 后端（Python 3.12）
-cd backend
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-cd ..
-.venv\Scripts\python -m uvicorn backend.app.main:app --port 8000
-
-# 前端（Node 18+）
-cd frontend
-npm install
-npm run dev   # http://localhost:5173，已配置 /api 代理
+pip install PyQt5 netmiko cryptography
+python main.py
 ```
 
 ### 🙏 致谢上游
