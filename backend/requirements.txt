@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+aiosqlite
+netmiko
+jinja2
+cryptography
+openpyxl
