@@ -10,10 +10,11 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QMessageBox, QFileDialog, QSplitter, QStatusBar,
                              QDialog, QListWidget, QDialogButtonBox, QMenu, QAction,
                              QComboBox, QMenuBar)
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor
 
-from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
+from gui.title_bar import FramelessTitleBar
 from gui.tabs.basic_tab import BasicConfigTab
 from gui.tabs.vlan_tab import VLANConfigTab
 from gui.tabs.routing_tab import RoutingConfigTab
@@ -101,7 +102,7 @@ class TemplateDialog(QDialog):
         layout = QVBoxLayout(self)
         
         label = QLabel("请选择一个预设模板快速生成配置：")
-        label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; color: #1976D2;")
+        label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; color: #1F2A37;")
         layout.addWidget(label)
         
         self.template_list = QListWidget()
@@ -155,27 +156,42 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("NetOps Toolkit v4.0 - 网络运维工具集")
         self.setMinimumSize(1200, 800)
         self.resize(1400, 900)
+        # 无边框圆角窗口（二开：现代标题栏，对标桌面管家类工具）
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window | Qt.WindowSystemMenuHint)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setMouseTracking(True)
         self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE)
         
         self.createMenuBar()
+        
+        # 自定义标题栏 + 菜单栏融合（menuBar 位于标题栏正下方）
+        self.title_bar = FramelessTitleBar("NetOps Toolkit", self)
+        title_container = QWidget()
+        title_v = QVBoxLayout(title_container)
+        title_v.setContentsMargins(0, 0, 0, 0)
+        title_v.setSpacing(0)
+        title_v.addWidget(self.title_bar)
+        title_v.addWidget(self.menuBar())
+        self.setMenuWidget(title_container)
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(20)
         
         header_widget = QWidget()
         header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(0, 0, 0, 10)
+        header_layout.setContentsMargins(4, 0, 0, 8)
+        header_layout.setSpacing(16)
         
         self.header_label = QLabel("华为交换机配置脚本生成工具")
         self.header_label.setStyleSheet("""
-            font-size: 24px;
+            font-size: 26px;
             font-weight: bold;
-            color: #1976D2;
-            padding: 8px;
+            color: #1F2A37;
+            padding: 4px;
             background: transparent;
         """)
         self.header_label.setAlignment(Qt.AlignCenter)
@@ -187,7 +203,7 @@ class MainWindow(QMainWindow):
         device_layout.setSpacing(10)
         
         device_label = QLabel("设备品牌")
-        device_label.setStyleSheet("font-weight: bold; color: #1976D2; font-size: 13px;")
+        device_label.setStyleSheet("font-weight: bold; color: #5A6B7B; font-size: 14px;")
         device_layout.addWidget(device_label)
         
         self.device_combo = QComboBox()
@@ -200,12 +216,12 @@ class MainWindow(QMainWindow):
         
         version_label = QLabel("v4.0")
         version_label.setStyleSheet("""
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
-            color: #2196F3;
-            padding: 5px 10px;
-            background: rgba(124, 58, 237, 0.1);
-            border-radius: 4px;
+            color: #ffffff;
+            padding: 6px 14px;
+            background: #0089FF;
+            border-radius: 11px;
         """)
         header_layout.addWidget(version_label)
         
@@ -284,8 +300,8 @@ class MainWindow(QMainWindow):
         preview_label.setStyleSheet("""
             font-size: 18px;
             font-weight: bold;
-            color: #1976D2;
-            padding: 5px;
+            color: #1F2A37;
+            padding: 4px;
         """)
         preview_header.addWidget(preview_label)
         
@@ -301,13 +317,17 @@ class MainWindow(QMainWindow):
         self.preview_text.setReadOnly(True)
         self.preview_text.setStyleSheet("""
             font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
-            font-size: 13px;
-            background: rgba(10, 10, 30, 0.9);
-            border: 1px solid rgba(0, 212, 255, 0.3);
-            border-radius: 8px;
-            padding: 10px;
-            color: #e0e0e0;
+            font-size: 14px;
+            line-height: 1.65;
+            background: #1E2430;
+            border: 1px solid #2C3444;
+            border-radius: 16px;
+            padding: 14px;
+            color: #C8D3E8;
+            selection-background-color: #0089FF;
+            selection-color: #ffffff;
         """)
+        self.preview_text.setPlaceholderText("← 在左侧填写参数，点击「生成配置」后，完整配置将在这里输出\n\n生成的配置可直接复制上设备，或用「设备运维」页下发到真机")
         self.preview_text.textChanged.connect(self.update_info)
         right_layout.addWidget(self.preview_text, 1)
         
@@ -323,7 +343,7 @@ class MainWindow(QMainWindow):
         export_layout.addWidget(export_btn)
         
         copy_btn = QPushButton("复制配置")
-        copy_btn.setObjectName("warningButton")
+        copy_btn.setObjectName("secondaryButton")
         copy_btn.setToolTip("复制配置到剪贴板 (Ctrl+C)")
         copy_btn.clicked.connect(self.copy_to_clipboard)
         export_layout.addWidget(copy_btn)
@@ -338,7 +358,89 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(content_splitter, 1)
         
         self.statusBar().showMessage("就绪 | 点击「网络工具」菜单使用网络工具箱")
+        self._apply_form_layout_polish()
+
+    def _apply_form_layout_polish(self):
+        """统一打磨全窗口表单与卡片（一处代码覆盖所有 tab）：
+        - 标签右对齐 + 统一最小宽 → 所有分组的输入框起点跨布局对齐
+        - QGroupBox 轻阴影 → 卡片层次感
+        """
+        from PyQt5.QtWidgets import QFormLayout, QGroupBox
+        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        for form in self.findChildren(QFormLayout):
+            form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            form.setFormAlignment(Qt.AlignTop | Qt.AlignHCenter)
+            form.setHorizontalSpacing(14)
+            form.setVerticalSpacing(13)
+            for row in range(form.rowCount()):
+                item = form.itemAt(row, QFormLayout.LabelRole)
+                if item is not None and item.widget() is not None:
+                    item.widget().setMinimumWidth(88)
+        for group in self.findChildren(QGroupBox):
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(22)
+            shadow.setOffset(0, 3)
+            shadow.setColor(QColor(31, 42, 55, 28))  # 墨色 11% 透明度
+            group.setGraphicsEffect(shadow)
     
+    # ---------------- 无边框窗口：圆角绘制与边缘缩放（二开新增）----------------
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(BG))
+        radius = 12 if not self.isMaximized() else 0
+        painter.drawRoundedRect(0, 0, self.width(), self.height(), radius, radius)
+
+    _RESIZE_MARGIN = 8
+    _resize_edge = None
+    _resize_start = None
+    _resize_geo = None
+
+    def _edge_at(self, pos):
+        right = pos.x() >= self.width() - self._RESIZE_MARGIN
+        bottom = pos.y() >= self.height() - self._RESIZE_MARGIN
+        if right and bottom:
+            return "rb"
+        if right:
+            return "r"
+        if bottom:
+            return "b"
+        return ""
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and not self.isMaximized():
+            edge = self._edge_at(event.pos())
+            if edge:
+                self._resize_edge = edge
+                self._resize_start = event.globalPos()
+                self._resize_geo = self.geometry()
+                return
+        self._resize_edge = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._resize_edge:
+            diff = event.globalPos() - self._resize_start
+            geo = self._resize_geo
+            min_w = self.minimumSize().width()
+            min_h = self.minimumSize().height()
+            if "r" in self._resize_edge:
+                geo.setWidth(max(min_w, geo.width() + diff.x()))
+            if "b" in self._resize_edge:
+                geo.setHeight(max(min_h, geo.height() + diff.y()))
+            self.setGeometry(geo)
+            return
+        if not self.isMaximized():
+            edge = self._edge_at(event.pos())
+            cursors = {"rb": Qt.SizeFDiagCursor, "r": Qt.SizeHorCursor, "b": Qt.SizeVerCursor}
+            self.setCursor(QCursor(cursors[edge]) if edge else Qt.ArrowCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._resize_edge = None
+        super().mouseReleaseEvent(event)
+
     def createMenuBar(self):
         """创建菜单栏"""
         menubar = self.menuBar()

@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPalette, QColor, QPalette, QColor
 
 from gui.main_window import MainWindow
 from gui.tools_window import NetworkToolsWindow
@@ -31,6 +31,11 @@ def main():
     
     font = QFont("Microsoft YaHei UI", 9)
     app.setFont(font)
+    
+    # 输入框占位文字对比度（QSS 无 placeholder 伪态，由 QPalette 兑底）
+    palette = app.palette()
+    palette.setColor(QPalette.PlaceholderText, QColor("#8A95A6"))
+    app.setPalette(palette)
     
     splash_manager = SplashManager(app)
     
