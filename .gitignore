@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 数据与密钥（不入库！）
+backend/data/netops.db
+backend/data/secret.key
+backups/
+
+# Node / 前端
+node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+
+# 打包产物
+build/
+dist/
+*.spec
+
+# 系统杂项
+Thumbs.db
+.DS_Store
+# 前端锁文件保留提交
