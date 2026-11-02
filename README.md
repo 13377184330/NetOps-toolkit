@@ -17,9 +17,14 @@
 ### 运行
 
 ```bash
-pip install PyQt5 netmiko cryptography
+pip install PyQt5 netmiko cryptography requests
 python main.py
 ```
+
+> ⚠️ **路径警告**：PyQt5 5.15（Qt 5.15.2）在**含中文等非英文字符的路径**下无法加载 Qt 平台插件，
+> 启动即报 `no Qt platform plugin could be initialized`（实测复现；Qt 6 已修复该问题）。
+> 请将项目放在**纯英文路径**下运行，如 `D:\NetOps-toolkit`。
+> 若必须在中文路径下开发，可将 Python 虚拟环境建在英文路径（PyQt5 装在 venv 中即可正常运行项目代码）。
 
 ### 🙏 致谢上游
 

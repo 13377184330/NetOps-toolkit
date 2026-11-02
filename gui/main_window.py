@@ -19,6 +19,7 @@ from gui.tabs.vlan_tab import VLANConfigTab
 from gui.tabs.routing_tab import RoutingConfigTab
 from gui.tabs.security_tab import SecurityConfigTab
 from gui.tabs.interface_tab import InterfaceConfigTab
+from gui.tabs.device_ops_tab import DeviceOpsTab
 from utils.templates import get_template_names, get_template_config
 from utils.validator import ConfigValidator
 
@@ -227,7 +228,8 @@ class MainWindow(QMainWindow):
             "vlan": VLANConfigTab(),
             "routing": RoutingConfigTab(),
             "security": SecurityConfigTab(),
-            "interface": InterfaceConfigTab()
+            "interface": InterfaceConfigTab(),
+            "device_ops": DeviceOpsTab()
         }
         
         self.tab_widget.addTab(self.tabs["basic"], "基础配置")
@@ -235,6 +237,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.tabs["routing"], "路由配置")
         self.tab_widget.addTab(self.tabs["security"], "安全配置")
         self.tab_widget.addTab(self.tabs["interface"], "接口配置")
+        self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
         
         left_layout.addWidget(self.tab_widget)
         
