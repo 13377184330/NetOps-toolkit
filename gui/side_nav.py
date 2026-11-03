@@ -55,6 +55,9 @@ class _SideNavWidget(QWidget):
         self._nav.setStyleSheet(NAV_QSS)
         self._nav.setFixedWidth(160)
         self._nav.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._nav.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # 单列菜单，永不出横向拖动条
+        self._nav.setHorizontalScrollMode(QListWidget.ScrollPerPixel)
+        self._nav.setTextElideMode(Qt.ElideNone)  # 保证文字完整不省略
         lay.addWidget(self._nav)
 
         self._stack = QStackedWidget()

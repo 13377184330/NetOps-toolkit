@@ -62,10 +62,19 @@ class FramelessTitleBar(QWidget):
         layout.addWidget(self.title_label)
         layout.addStretch()
 
+        # 右侧：宿主可放置的扩展槽（如设备品牌下拉），与拖动区共用标题行
+        self.trailing_layout = QHBoxLayout()
+        self.trailing_layout.setSpacing(8)
+        layout.addLayout(self.trailing_layout)
+
         # 事件绑定
         self.close_dot.clicked.connect(self._do_close)
         self.min_dot.clicked.connect(self._do_min)
         self.max_dot.clicked.connect(self._do_max)
+
+    def add_trailing(self, widget):
+        """在标题栏右侧追加控件（不参与拖动）"""
+        self.trailing_layout.addWidget(widget)
 
     # ---------------- 窗口操作 ----------------
     def _win(self):

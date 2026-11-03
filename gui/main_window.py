@@ -172,6 +172,16 @@ class MainWindow(QMainWindow):
         
         # 自定义标题栏 + 菜单栏融合（menuBar 位于标题栏正下方）
         self.title_bar = FramelessTitleBar("NetOps Toolkit", self)
+        # 设备品牌下拉并入标题栏右侧（与右侧窗口边界同行，省一整行）
+        self.device_combo = QComboBox()
+        self.device_combo.addItems(["华为 Huawei", "华三 H3C", "锐捷 Ruijie", "迈普 Maipu"])
+        self.device_combo.currentIndexChanged.connect(self.on_device_changed)
+        self.device_combo.setMinimumWidth(130)
+        self.device_combo.setStyleSheet("""
+            QComboBox { font-size: 12px; padding: 4px 10px; }
+        """)
+        self.title_bar.add_trailing(self.device_combo)
+
         title_container = QWidget()
         title_v = QVBoxLayout(title_container)
         title_v.setContentsMargins(0, 0, 0, 0)
@@ -179,37 +189,13 @@ class MainWindow(QMainWindow):
         title_v.addWidget(self.title_bar)
         title_v.addWidget(self.menuBar())
         self.setMenuWidget(title_container)
-        
+
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
+
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(16, 12, 16, 12)
         main_layout.setSpacing(10)
-        
-        # ---- 紧凑工具行（代替原来占 12-15% 高度的大标题区）----
-        tools_row = QHBoxLayout()
-        tools_row.setSpacing(12)
-        
-        self.header_label = QLabel("交换机配置生成")
-        self.header_label.setStyleSheet("""
-            font-size: 15px;
-            font-weight: bold;
-            color: #1F2A37;
-            background: transparent;
-        """)
-        tools_row.addWidget(self.header_label)
-        tools_row.addStretch()
-        
-        self.device_combo = QComboBox()
-        self.device_combo.addItems(["华为 Huawei", "华三 H3C", "锐捷 Ruijie", "迈普 Maipu"])
-        self.device_combo.currentIndexChanged.connect(self.on_device_changed)
-        self.device_combo.setMinimumWidth(140)
-        tools_row.addWidget(self.device_combo)
-        
-        tools_widget = QWidget()
-        tools_widget.setLayout(tools_row)
-        main_layout.addWidget(tools_widget)
         
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setHandleWidth(3)
@@ -446,15 +432,6 @@ class MainWindow(QMainWindow):
         # 配置操作按钮行
         if hasattr(self, "_config_tools_widget"):
             self._config_tools_widget.setVisible(not full_width)
-        # 表单标签同步（header 文案随页更新）
-        if hasattr(self, "header_label"):
-            page_titles = {
-                "基础配置": "交换机配置生成", "VLAN配置": "交换机配置生成",
-                "路由配置": "交换机配置生成", "安全配置": "交换机配置生成",
-                "接口配置": "交换机配置生成", "设备运维": "设备运维管理",
-                "Console 可视化": "Console 只读可视化",
-            }
-            self.header_label.setText(page_titles.get(title, "NetOps Toolkit"))
 
     def toggle_preview_panel(self):
         """折叠/展开右侧配置预览区"""
@@ -730,7 +707,7 @@ class MainWindow(QMainWindow):
         }
         
         title, name, _ = device_names[self.current_device_type]
-        self.header_label.setText(title)
+        # 品牌切换不再更新大标题（标题栏常驻"NetOps Toolkit"，品牌以下拉自示）
         self.setWindowTitle(f"NetOps Toolkit v4.0 - {name}配置")
         
         for tab in self.tabs.values():

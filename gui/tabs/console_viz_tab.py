@@ -127,11 +127,7 @@ class ConsoleVizTab(QWidget):
         self.progress_label.setStyleSheet("color: #7A8699; font-size: 12px;")
         layout.addWidget(self.progress_label)
 
-        # 可视化区（树 + 配置原文 双栏）
-        viz_splitter_layout = QHBoxLayout()
-        viz_splitter_layout.setSpacing(10)
-
-        # 左：信息树
+        # 可视化区：上=信息树（全宽独占），下=日志+配置原文（独立整行，看得全）
         tree_group = QGroupBox("配置概览（分层）")
         tree_lay = QVBoxLayout(tree_group)
         self.tree = QTreeWidget()
@@ -139,31 +135,37 @@ class ConsoleVizTab(QWidget):
         self.tree.setColumnWidth(0, 260)
         self.tree.setAlternatingRowColors(True)
         tree_lay.addWidget(self.tree)
-        viz_splitter_layout.addWidget(tree_group, 3)
+        layout.addWidget(tree_group, 3)   # 树占大头
 
-        # 右：原文 + 统计
-        right_group = QGroupBox("配置原文 / 采集日志")
-        right_lay = QVBoxLayout(right_group)
+        # 底部独立行：左日志 + 右原文（各占一半，宽度充足看得全）
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(10)
 
+        log_group = QGroupBox("采集日志")
+        log_lay = QVBoxLayout(log_group)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
-        self.log_view.setMaximumHeight(140)
-        right_lay.addWidget(self.log_view)
+        log_lay.addWidget(self.log_view)
+        bottom_row.addWidget(log_group, 1)
 
+        raw_group = QGroupBox("配置原文（running-configuration）")
+        raw_lay = QVBoxLayout(raw_group)
         self.raw_view = QTextEdit()
         self.raw_view.setReadOnly(True)
-        self.raw_view.setPlaceholderText("running-configuration 原文显示在这里")
-        right_lay.addWidget(self.raw_view, 1)
+        self.raw_view.setPlaceholderText("配置原文显示在这里（全宽展示，看得全）")
+        raw_lay.addWidget(self.raw_view)
 
+        raw_btn_row = QHBoxLayout()
         save_btn = QPushButton("💾 保存配置文件（.cfg）")
         save_btn.setObjectName("secondaryButton")
         save_btn.clicked.connect(self.save_config)
-        right_lay.addWidget(save_btn)
+        raw_btn_row.addStretch()
+        raw_btn_row.addWidget(save_btn)
+        raw_lay.addLayout(raw_btn_row)
+        bottom_row.addWidget(raw_group, 2)
 
-        viz_splitter_layout.addWidget(right_group, 2)
-
-        layout.addLayout(viz_splitter_layout, 1)
+        layout.addLayout(bottom_row, 2)
 
         self._last_result = None
         self._raw_config = ""
