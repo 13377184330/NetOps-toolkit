@@ -1,0 +1,9 @@
+# 运行依赖（桌面工具）
+PyQt5==5.15.10
+PyQt5_sip==12.13.0
+netmiko
+# 老设备兼容：paramiko 5.x 移除了 ssh-rsa/SHA1 签名，老 H3C/华为只支持这些
+paramiko==3.5.1
+cryptography
+requests
+pyserial
