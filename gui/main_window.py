@@ -154,16 +154,12 @@ class MainWindow(QMainWindow):
     
     def initUI(self):
         self.setWindowTitle("NetOps Toolkit v4.0 - 网络运维工具集")
-        self.setMinimumSize(1100, 700)
-        # 按屏幕可用区自适应：占 85% 且绝不超屏（高分屏/缩放环境下窗口不再溢出）
-        screen = QGuiApplication.primaryScreen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            target_w = min(int(avail.width() * 0.85), 1500)
-            target_h = min(int(avail.height() * 0.82), 880)  # 高度多收一档，给状态栏/任务栏留呼吸
-            self.resize(target_w, target_h)
-        else:
-            self.resize(1280, 800)
+        self.setMinimumSize(1024, 640)
+        # 窗口尺寸：默认 1200x740（约7成屏）；用户拖动调整过的尺寸会被记住（key: window_geometry）
+        # 比例法在不同 DPI 感知模式下结果漂移，故用绝对默认值 + 记忆用户尺寸代替
+        geo = self._restore_geometry()
+        if geo is None:
+            self.resize(1200, 740)
         # 无边框圆角窗口（二开：现代标题栏，对标桌面管家类工具）
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window | Qt.WindowSystemMenuHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -409,6 +405,37 @@ class MainWindow(QMainWindow):
         
         self.statusBar().showMessage("就绪 | 点击「网络工具」菜单使用网络工具箱")
         self._apply_form_layout_polish()
+
+    def _restore_geometry(self):
+        """从 settings 恢复上次窗口尺寸（用户拖过的尺寸优先于默认值）"""
+        try:
+            from utils.settings import Settings
+            s = Settings()
+            saved = s.get("window_geometry", None)
+            if saved and isinstance(saved, (list, tuple)) and len(saved) == 4:
+                from PyQt5.QtCore import QRect
+                r = QRect(*[int(v) for v in saved])
+                screen = QGuiApplication.primaryScreen()
+                if screen is not None:
+                    avail = screen.availableGeometry()
+                    # 带回屏幕内 & 不小于最小尺寸
+                    r = r.intersected(avail)
+                    if r.width() >= self.minimumWidth() and r.height() >= self.minimumHeight() and r.width() > 0:
+                        self.setGeometry(r)
+                        return r
+        except Exception:
+            pass
+        return None
+
+    def closeEvent(self, event):
+        """关闭时记住窗口尺寸位置"""
+        try:
+            from utils.settings import Settings
+            g = self.geometry()
+            Settings().set("window_geometry", [g.x(), g.y(), g.width(), g.height()])
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     def toggle_preview_panel(self):
         """折叠/展开右侧配置预览区"""

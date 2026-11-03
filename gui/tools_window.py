@@ -40,8 +40,18 @@ class NetworkToolsWindow(QMainWindow):
 
     def initUI(self):
         self.setWindowTitle("NetOps Toolkit - 网络工具箱")
-        self.setGeometry(200, 200, 1000, 800)
-        self.setMinimumSize(860, 620)
+        self.setMinimumSize(820, 600)
+        # 按屏幕可用区自适应（占 65%/72%），与主窗口同一套适配策略
+        from PyQt5.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            w = min(int(avail.width() * 0.65), 1100)
+            h = min(int(avail.height() * 0.72), 760)
+            self.resize(w, h)
+            self.move(avail.center().x() - w // 2, avail.center().y() - h // 2)
+        else:
+            self.resize(1000, 720)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window | Qt.WindowSystemMenuHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
