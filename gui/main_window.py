@@ -15,6 +15,7 @@ from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
 from gui.title_bar import FramelessTitleBar
+from gui.side_nav import _SideNavWidget
 from gui.tabs.basic_tab import BasicConfigTab
 from gui.tabs.vlan_tab import VLANConfigTab
 from gui.tabs.routing_tab import RoutingConfigTab
@@ -183,69 +184,38 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(24, 20, 24, 20)
-        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(10)
         
-        header_widget = QWidget()
-        header_layout = QHBoxLayout(header_widget)
-        header_layout.setContentsMargins(4, 0, 0, 8)
-        header_layout.setSpacing(16)
+        # ---- 紧凑工具行（代替原来占 12-15% 高度的大标题区）----
+        tools_row = QHBoxLayout()
+        tools_row.setSpacing(12)
         
-        self.header_label = QLabel("华为交换机配置脚本生成工具")
+        self.header_label = QLabel("交换机配置生成")
         self.header_label.setStyleSheet("""
-            font-size: 26px;
+            font-size: 15px;
             font-weight: bold;
             color: #1F2A37;
-            padding: 4px;
             background: transparent;
         """)
-        self.header_label.setAlignment(Qt.AlignCenter)
-        header_layout.addWidget(self.header_label, 1)
-        
-        device_widget = QWidget()
-        device_layout = QHBoxLayout(device_widget)
-        device_layout.setContentsMargins(15, 0, 0, 0)
-        device_layout.setSpacing(10)
-        
-        device_label = QLabel("设备品牌")
-        device_label.setStyleSheet("font-weight: bold; color: #5A6B7B; font-size: 14px;")
-        device_layout.addWidget(device_label)
+        tools_row.addWidget(self.header_label)
+        tools_row.addStretch()
         
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["华为 (Huawei)", "华三 (H3C)", "锐捷 (Ruijie)", "迈普 (Maipu)"])
+        self.device_combo.addItems(["华为 Huawei", "华三 H3C", "锐捷 Ruijie", "迈普 Maipu"])
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
-        self.device_combo.setMinimumWidth(160)
-        device_layout.addWidget(self.device_combo)
+        self.device_combo.setMinimumWidth(140)
+        tools_row.addWidget(self.device_combo)
         
-        header_layout.addWidget(device_widget)
-        
-        version_label = QLabel("v4.0")
-        version_label.setStyleSheet("""
-            font-size: 13px;
-            font-weight: bold;
-            color: #ffffff;
-            padding: 6px 14px;
-            background: #0089FF;
-            border-radius: 11px;
-        """)
-        header_layout.addWidget(version_label)
-        
-        main_layout.addWidget(header_widget)
+        tools_widget = QWidget()
+        tools_widget.setLayout(tools_row)
+        main_layout.addWidget(tools_widget)
         
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setHandleWidth(3)
         
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
-        
-        self.tab_widget = QTabWidget()
-        self.tab_widget.setTabPosition(QTabWidget.North)
-        # 标准（非 document）模式：tab 栏带安全内边距，tab 过多时出滚动箭头而不是裁切首 tab
-        self.tab_widget.setUsesScrollButtons(True)
-        self.tab_widget.setElideMode(Qt.ElideNone)
-        
+        self.tab_widget = _SideNavWidget()
+        # 页面映射：tab_widget.addTab(widget, title) → 导航列表 + 堆栈页
         self.tabs = {
             "basic": BasicConfigTab(),
             "vlan": VLANConfigTab(),
@@ -289,15 +259,32 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(scroll_wrap(self.tabs["routing"]), "路由配置")
         self.tab_widget.addTab(scroll_wrap(self.tabs["security"]), "安全配置")
         self.tab_widget.addTab(scroll_wrap(self.tabs["interface"]), "接口配置")
-        self.tab_widget.addTab(scroll_wrap(self.tabs["device_ops"]), "设备运维")
+        self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
         self.tab_widget.addTab(self.tabs["console_viz"], "Console 可视化")
+        # 页面切换时：配置页带预览区、运维/Console 页独占全宽
+        self.tab_widget.currentChanged.connect(self._on_page_changed)
+        self._preview_collapsed = False
+        # 全局样式后显式应用侧边导航样式（防覆盖）
+        from gui.side_nav import NAV_QSS
+        self.tab_widget.setStyleSheet(NAV_QSS)
+        self.tab_widget._nav.setStyleSheet(NAV_QSS)
+        self.tab_widget.select_first()  # 默认选中第一页（导航高亮）
         
-        left_layout.addWidget(self.tab_widget)
+        # 主内容：左侧导航+页面（widget），右侧预览区
+        nav_widget = QWidget()
+        nav_layout = QVBoxLayout(nav_widget)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(0)
+        nav_layout.addWidget(self.tab_widget)
         
+        left_widget = nav_widget
+        left_layout = nav_layout
+        
+        # 配置操作按钮行（模板/验证/生成/清空/收预览——仅配置页显示）
         button_widget = QWidget()
         button_layout = QHBoxLayout(button_widget)
-        button_layout.setSpacing(12)
-        button_layout.setContentsMargins(5, 10, 5, 5)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        self._config_tools_widget = button_widget
         
         template_btn = QPushButton("配置模板")
         template_btn.setObjectName("ghostButton")
@@ -331,8 +318,9 @@ class MainWindow(QMainWindow):
         self.toggle_preview_btn.clicked.connect(self.toggle_preview_panel)
         button_layout.addWidget(self.toggle_preview_btn)
         
+        # 按页隐藏操作按钮行（模板/生成/清空等仅配置页需要）
+        button_layout.setSpacing(8)
         left_layout.addWidget(button_widget)
-        
         content_splitter.addWidget(left_widget)
         
         right_widget = QWidget()
@@ -439,6 +427,34 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         super().closeEvent(event)
+
+    # 全宽独占页集合（无右侧预览、无配置操作按钮）
+    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化"}
+
+    def _on_page_changed(self, index: int):
+        """页面切换：配置页显示预览区+操作行；运维/Console 页独占全宽"""
+        if index < 0:
+            return
+        title = self.tab_widget.tabText(index)
+        full_width = title in self._FULL_WIDTH_PAGES
+        # 右侧预览区
+        if hasattr(self, "right_widget"):
+            self.right_widget.setVisible(not full_width)
+        # 折叠状态重置（全宽页强制视为展开）
+        if full_width:
+            self._preview_collapsed = False
+        # 配置操作按钮行
+        if hasattr(self, "_config_tools_widget"):
+            self._config_tools_widget.setVisible(not full_width)
+        # 表单标签同步（header 文案随页更新）
+        if hasattr(self, "header_label"):
+            page_titles = {
+                "基础配置": "交换机配置生成", "VLAN配置": "交换机配置生成",
+                "路由配置": "交换机配置生成", "安全配置": "交换机配置生成",
+                "接口配置": "交换机配置生成", "设备运维": "设备运维管理",
+                "Console 可视化": "Console 只读可视化",
+            }
+            self.header_label.setText(page_titles.get(title, "NetOps Toolkit"))
 
     def toggle_preview_panel(self):
         """折叠/展开右侧配置预览区"""
