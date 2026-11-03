@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QMessageBox, QFileDialog, QSplitter, QStatusBar,
                              QDialog, QListWidget, QDialogButtonBox, QMenu, QAction,
                              QComboBox, QMenuBar)
-from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtCore import Qt, QPoint, QEvent, QObject
 from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
@@ -458,6 +458,23 @@ class MainWindow(QMainWindow):
             shadow.setOffset(0, 3)
             shadow.setColor(QColor(31, 42, 55, 28))  # 墨色 11% 透明度
             group.setGraphicsEffect(shadow)
+
+        # 4) 卡片折叠化（信息分层）：点标题收起/展开，每个 tab 默认只展开第一张卡片
+        self._collapser = _GroupCollapser(self)
+        for tab_key in ("basic", "vlan", "routing", "security", "interface"):
+            tab = self.tabs.get(tab_key)
+            if tab is None:
+                continue
+            groups = tab.findChildren(QGroupBox)
+            for idx, group in enumerate(groups):
+                if idx == 0:
+                    self._collapser.mark_expanded(group)
+                else:
+                    self._collapser.collapse(group)
+                group.installEventFilter(self._collapser)
+                group.setCursor(QCursor(Qt.PointingHandCursor))
+                group.setToolTip(f"{group.title()} —— 点击标题栏可展开/收起")
+
     
     # ---------------- 无边框窗口：圆角绘制与边缘缩放（二开新增）----------------
     def paintEvent(self, event):
@@ -1040,3 +1057,60 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "成功", "模板导出成功！")
             else:
                 QMessageBox.warning(self, "失败", "导出模板失败。")
+
+
+
+class _GroupCollapser(QObject):
+    """QGroupBox 折叠管理器：点击标题区切换收起/展开（不改动各 tab 源码）"""
+
+    COLLAPSED_MARK = " ▸"
+    EXPANDED_MARK = " ▾"
+    TITLE_ZONE = 40  # QSS 中标题位于 padding 顶部 36px 区，点击命中判定线
+    COLLAPSED_HEIGHT = 44
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._expanded = set()  # id(QGroupBox) 集合
+
+    # ---- 状态 ----
+    def is_expanded(self, group):
+        return id(group) in self._expanded
+
+    def mark_expanded(self, group):
+        self._expanded.add(id(group))
+        self._set_title(group, self.EXPANDED_MARK)
+
+    # ---- 切换 ----
+    def collapse(self, group):
+        from PyQt5.QtWidgets import QWidget
+        for child in group.findChildren(QWidget):
+            child.hide()
+        group.setMaximumHeight(self.COLLAPSED_HEIGHT)
+        self._expanded.discard(id(group))
+        self._set_title(group, self.COLLAPSED_MARK)
+
+    def expand(self, group):
+        from PyQt5.QtWidgets import QWidget
+        group.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        for child in group.findChildren(QWidget):
+            child.show()
+        self._expanded.add(id(group))
+        self._set_title(group, self.EXPANDED_MARK)
+
+    def toggle(self, group):
+        if self.is_expanded(group):
+            self.collapse(group)
+        else:
+            self.expand(group)
+
+    def _set_title(self, group, mark):
+        base = group.title().replace(self.COLLAPSED_MARK, "").replace(self.EXPANDED_MARK, "")
+        group.setTitle(base + mark)
+
+    # ---- 事件过滤：标题区点击 ----
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.MouseButtonRelease:
+            if 0 <= event.pos().y() <= self.TITLE_ZONE:
+                self.toggle(obj)
+                return True
+        return super().eventFilter(obj, event)
