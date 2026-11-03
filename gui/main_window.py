@@ -21,6 +21,7 @@ from gui.tabs.routing_tab import RoutingConfigTab
 from gui.tabs.security_tab import SecurityConfigTab
 from gui.tabs.interface_tab import InterfaceConfigTab
 from gui.tabs.device_ops_tab import DeviceOpsTab
+from gui.tabs.console_viz_tab import ConsoleVizTab
 from utils.templates import get_template_names, get_template_config
 from utils.validator import ConfigValidator
 
@@ -251,7 +252,8 @@ class MainWindow(QMainWindow):
             "routing": RoutingConfigTab(),
             "security": SecurityConfigTab(),
             "interface": InterfaceConfigTab(),
-            "device_ops": DeviceOpsTab()
+            "device_ops": DeviceOpsTab(),
+            "console_viz": ConsoleVizTab()
         }
 
         def scroll_wrap(widget):
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(scroll_wrap(self.tabs["security"]), "安全配置")
         self.tab_widget.addTab(scroll_wrap(self.tabs["interface"]), "接口配置")
         self.tab_widget.addTab(scroll_wrap(self.tabs["device_ops"]), "设备运维")
+        self.tab_widget.addTab(self.tabs["console_viz"], "Console 可视化")
         
         left_layout.addWidget(self.tab_widget)
         
