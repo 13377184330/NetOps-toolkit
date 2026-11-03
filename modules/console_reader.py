@@ -141,6 +141,15 @@ VENDOR_VERSION_CMD = {
     "cisco": "show version",
 }
 
+# LLDP 邻居查询命令（只读）
+VENDOR_LLDP_CMD = {
+    "huawei": "display lldp neighbor brief",
+    "h3c": "display lldp neighbor-information verbose",
+    "ruijie": "show lldp neighbors",
+    "maipu": "show lldp neighbors",
+    "cisco": "show lldp neighbors",
+}
+
 
 def _send(ser, command: str):
     """发送前的只读校验（红线执行点：所有命令出口都过这里）"""
@@ -221,6 +230,13 @@ class ConsoleReader:
             self.detect()
         cmd = VENDOR_VERSION_CMD.get(self.vendor, "display version")
         return self._exec(cmd, max_wait=15)
+
+    def read_lldp(self):
+        """抓取 LLDP 邻居信息（只读），用于拓扑可视化"""
+        if self.vendor is None:
+            self.detect()
+        cmd = VENDOR_LLDP_CMD.get(self.vendor, "display lldp neighbor-information verbose")
+        return self._exec(cmd, max_wait=25)
 
     @staticmethod
     def _clean(text: str, cmd: str) -> str:

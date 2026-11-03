@@ -157,6 +157,45 @@ def parse_security(text: str) -> list[str]:
     return items
 
 
+# ---------------------------------------------------------------- LLDP 邻居（拓扑）
+def parse_lldp(text: str) -> list[dict]:
+    """解析 LLDP 邻居信息（H3C verbose / 华为 brief / Cisco show lldp neighbors 通用宽松解析）
+    返回 [{port: 本地端口, name: 邻居设备名, peer_port: 对端端口}]
+    """
+    neighbors = []
+    if not text:
+        return neighbors
+    # H3C verbose: "LLDP neighbor-information of port 1[GigabitEthernet1/0/1]:" 后跟 System name / Port ID
+    blocks = re.split(r"LLDP neighbor-information of port\s+\d+\s*\[([^\]]+)\]", text)
+    if len(blocks) > 1:
+        # blocks: [前导, port1, body1, port2, body2, ...]
+        for i in range(1, len(blocks) - 1, 2):
+            port = blocks[i].strip()
+            body = blocks[i + 1]
+            name_m = re.search(r"System name\s*:\s*(\S+)", body)
+            peer_m = re.search(r"Port ID\s*:\s*(\S+)", body) or re.search(r"Port ID\s*:\s*(.+)$", body, re.M)
+            if name_m:
+                neighbors.append({
+                    "port": port,
+                    "name": name_m.group(1),
+                    "peer_port": peer_m.group(1).strip() if peer_m else "",
+                })
+        return neighbors
+
+    # Cisco / Ruijie 表格风格: "Gi1/0/1    Core-SW    Gi0/1    120"
+    for m in re.finditer(r"^(\S(?:i|e|G|T|F)[\w/.:\-]+)\s{2,}(\S+)\s{2,}([\w/.:\-]+)\s{2,}\d+", text, re.M):
+        neighbors.append({"port": m.group(1), "name": m.group(2), "peer_port": m.group(3)})
+    if neighbors:
+        return neighbors
+
+    # 华为 brief: "Local Intf  Neighbor Dev  Neighbor Intf"
+    for m in re.finditer(r"^(\S+)\s+(\S+)\s+(\S+)\s*$", text, re.M):
+        a, b, c = m.group(1), m.group(2), m.group(3)
+        if re.search(r"(GE|GigabitEthernet|Eth|XGE)", a, re.I):
+            neighbors.append({"port": a, "name": b, "peer_port": c})
+    return neighbors
+
+
 # ---------------------------------------------------------------- 汇总
 def parse_config(text: str) -> dict:
     """主入口：配置文本 → 可视化数据结构"""

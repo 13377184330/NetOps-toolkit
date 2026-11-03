@@ -36,7 +36,7 @@ class _ConsoleWorker(QThread):
         self.baud = baud
 
     def run(self):
-        result = {"vendor": None, "version": "", "config": "", "parsed": None}
+        result = {"vendor": None, "version": "", "config": "", "parsed": None, "lldp": ""}
         try:
             self.log.emit(f"[Console] 打开 {self.port} @ {self.baud} …")
             with cr.ConsoleReader(self.port, self.baud) as reader:
@@ -48,16 +48,21 @@ class _ConsoleWorker(QThread):
                     self.done.emit(False, result)
                     return
                 self.log.emit(f"[Console] 识别厂商：{VENDOR_LABELS.get(vendor, vendor)}")
-                self.progress.emit(35, "读取设备版本信息…")
+                self.progress.emit(30, "读取设备版本信息…")
                 result["version"] = reader.read_version()
-                self.progress.emit(60, "抓取 running-configuration（只读）…")
+                self.progress.emit(55, "抓取 running-configuration…")
 
                 def on_rcv(n):
                     self.log.emit(f"[Console] 已接收 {n} 字节…")
 
                 result["config"] = reader.read_config(progress_cb=on_rcv)
-                self.progress.emit(90, "解析配置…")
+                self.progress.emit(80, "解析配置…")
                 result["parsed"] = cv.parse_config(result["config"])
+                self.progress.emit(88, "采集 LLDP 邻居（拓扑用）…")
+                try:
+                    result["lldp"] = reader.read_lldp()
+                except Exception as e:
+                    self.log.emit(f"[Console] LLDP 采集跳过：{e}")
                 self.progress.emit(100, "完成")
                 self.log.emit(f"[Console] 抓取完成：{len(result['config'])} 字节配置")
                 self.done.emit(True, result)
@@ -83,15 +88,6 @@ class ConsoleVizTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(14)
-
-        # 顶部说明条（红线声明）——更紧凑的一行样式
-        banner = QLabel("🔒 只读模式：仅发送 display/show 查询命令，任何写操作在连接层被强制拦截")
-        banner.setStyleSheet("""
-            background: #FFF7E8; color: #B26A00;
-            border: 1px solid #FFD591; border-radius: 8px;
-            padding: 6px 12px; font-size: 12px;
-        """)
-        layout.addWidget(banner)
 
         # 连接卡（控件间放宽间隔 + 弹性分配，不挤左边）
         conn_group = QGroupBox("Console 连接")
@@ -228,6 +224,27 @@ class ConsoleVizTab(QWidget):
         self.raw_view.setPlainText(result["config"])
         self._build_tree(result)
         self._sync_brand_combo(result.get("vendor"))
+        self._sync_topology(result)
+
+    def _sync_topology(self, result):
+        """Console 采集的 LLDP 邻居 → 自动填充「网络拓扑」页"""
+        try:
+            main = self.window()
+            topo = getattr(main, "tabs", {}).get("topology") if hasattr(main, "tabs") else None
+            if topo is None:
+                return
+            lldp_text = result.get("lldp") or ""
+            neighbors = cv.parse_lldp(lldp_text)
+            parsed_basic = result.get("parsed", {}).get("basic", {})
+            local_name = parsed_basic.get("主机名", "")
+            local_meta = {
+                "版本": parsed_basic.get("软件版本", ""),
+                "厂商": VENDOR_LABELS.get(result.get("vendor") or "", ""),
+            }
+            topo.load_topology(local_name, local_meta, neighbors)
+            self.log(f"[拓扑] 已更新网络拓扑：发现 {len(neighbors)} 台 LLDP 邻居")
+        except Exception as e:
+            self.log(f"[拓扑] 更新失败：{e}")
 
     def _sync_brand_combo(self, vendor):
         """厂商联动：Console 识别出厂商后，自动同步右上角设备品牌下拉

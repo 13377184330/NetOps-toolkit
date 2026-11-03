@@ -23,6 +23,8 @@ from gui.tabs.security_tab import SecurityConfigTab
 from gui.tabs.interface_tab import InterfaceConfigTab
 from gui.tabs.device_ops_tab import DeviceOpsTab
 from gui.tabs.console_viz_tab import ConsoleVizTab
+from gui.tabs.topology_tab import NetworkTopologyPage
+from gui.config_gen_page import ConfigGenPage
 from utils.templates import get_template_names, get_template_config
 from utils.validator import ConfigValidator
 
@@ -209,8 +211,17 @@ class MainWindow(QMainWindow):
             "security": SecurityConfigTab(),
             "interface": InterfaceConfigTab(),
             "device_ops": DeviceOpsTab(),
-            "console_viz": ConsoleVizTab()
+            "console_viz": ConsoleVizTab(),
+            "topology": NetworkTopologyPage()
         }
+        # 配置生成聚合页（5 个配置模块收进二级导航）
+        self.config_gen_page = ConfigGenPage({
+            "基础配置": self.tabs["basic"],
+            "VLAN配置": self.tabs["vlan"],
+            "路由配置": self.tabs["routing"],
+            "安全配置": self.tabs["security"],
+            "接口配置": self.tabs["interface"],
+        })
 
         def scroll_wrap(widget):
             """tab 内容包滚动区：视口装不下时出滚动条（横向纵向皆可滚动），
@@ -240,12 +251,9 @@ class MainWindow(QMainWindow):
             area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
             return area
 
-        self.tab_widget.addTab(scroll_wrap(self.tabs["basic"]), "基础配置")
-        self.tab_widget.addTab(scroll_wrap(self.tabs["vlan"]), "VLAN配置")
-        self.tab_widget.addTab(scroll_wrap(self.tabs["routing"]), "路由配置")
-        self.tab_widget.addTab(scroll_wrap(self.tabs["security"]), "安全配置")
-        self.tab_widget.addTab(scroll_wrap(self.tabs["interface"]), "接口配置")
+        self.tab_widget.addTab(scroll_wrap(self.config_gen_page), "配置生成")
         self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
+        self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
         self.tab_widget.addTab(self.tabs["console_viz"], "Console 可视化")
         # 页面切换时：配置页带预览区、运维/Console 页独占全宽
         self.tab_widget.currentChanged.connect(self._on_page_changed)
@@ -272,11 +280,7 @@ class MainWindow(QMainWindow):
         button_layout.setContentsMargins(0, 0, 0, 0)
         self._config_tools_widget = button_widget
         
-        template_btn = QPushButton("配置模板")
-        template_btn.setObjectName("ghostButton")
-        template_btn.setToolTip("选择预设配置模板 (Ctrl+L)")
-        template_btn.clicked.connect(self.show_template_dialog)
-        button_layout.addWidget(template_btn)
+        template_btn = None  # 「配置模板」按钮已移除：与顶部「模板(M)」菜单重复
         
         validate_btn = QPushButton("验证配置")
         validate_btn.setObjectName("ghostButton")
@@ -415,7 +419,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     # 全宽独占页集合（无右侧预览、无配置操作按钮）
-    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化"}
+    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化", "网络拓扑"}
 
     def _on_page_changed(self, index: int):
         """页面切换：配置页显示预览区+操作行；运维/Console 页独占全宽"""
