@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QDialog, QListWidget, QDialogButtonBox, QMenu, QAction,
                              QComboBox, QMenuBar)
 from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor
+from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
 from gui.title_bar import FramelessTitleBar
@@ -154,8 +154,16 @@ class MainWindow(QMainWindow):
     
     def initUI(self):
         self.setWindowTitle("NetOps Toolkit v4.0 - 网络运维工具集")
-        self.setMinimumSize(1200, 800)
-        self.resize(1400, 900)
+        self.setMinimumSize(1100, 700)
+        # 按屏幕可用区自适应：占 85% 且绝不超屏（高分屏/缩放环境下窗口不再溢出）
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            target_w = min(int(avail.width() * 0.85), 1500)
+            target_h = min(int(avail.height() * 0.85), 950)
+            self.resize(target_w, target_h)
+        else:
+            self.resize(1280, 800)
         # 无边框圆角窗口（二开：现代标题栏，对标桌面管家类工具）
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window | Qt.WindowSystemMenuHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -249,12 +257,30 @@ class MainWindow(QMainWindow):
         }
 
         def scroll_wrap(widget):
-            """tab 内容包滚动区：窗口装不下时出滚动条，绝不允许垂直压缩表单卡片（防文字叠印）"""
-            from PyQt5.QtWidgets import QScrollArea, QFrame
+            """tab 内容包滚动区：视口装不下时出滚动条（横向纵向皆可滚动），
+            绝不允许压缩表单卡片（防文字叠印/横向截断）"""
+            from PyQt5.QtWidgets import QScrollArea, QFrame, QGroupBox, QLineEdit, QSpinBox, QComboBox
+            # 1) 输入控件设最小宽：保证占位提示/输入内容读得清（150px ≈ 12 汉字占位）
+            for editor in widget.findChildren(QLineEdit):
+                editor.setMinimumWidth(150)
+            for sp in widget.findChildren(QSpinBox):
+                sp.setMinimumWidth(110)
+            for cb in widget.findChildren(QComboBox):
+                cb.setMinimumWidth(130)
+            # 2) 双栏页的左右面板设最小宽：每栏表单不被压扁
+            for panel in widget.findChildren(QWidget):
+                lay = panel.layout()
+                if lay is None:
+                    continue
+                if lay.count() and any(lay.itemAt(i) and isinstance(lay.itemAt(i).widget(), QGroupBox)
+                                        for i in range(lay.count())):
+                    panel.setMinimumWidth(300)
             area = QScrollArea()
             area.setWidget(widget)
             area.setWidgetResizable(True)
             area.setFrameShape(QFrame.NoFrame)
+            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
             area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
             return area
 
@@ -295,6 +321,14 @@ class MainWindow(QMainWindow):
         clear_btn.setToolTip("清空所有配置项")
         clear_btn.clicked.connect(self.clear_config)
         button_layout.addWidget(clear_btn)
+        
+        # 预览区折叠按钮：窄屏时收起给左侧表单让位（QQ管家式侧栏收纳）
+        self.toggle_preview_btn = QPushButton("⟩ 收起预览")
+        self.toggle_preview_btn.setObjectName("ghostButton")
+        self.toggle_preview_btn.setToolTip("收起/展开右侧配置预览区，收起后左侧表单区更宽")
+        self.toggle_preview_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.toggle_preview_btn.clicked.connect(self.toggle_preview_panel)
+        button_layout.addWidget(self.toggle_preview_btn)
         
         left_layout.addWidget(button_widget)
         
@@ -363,12 +397,25 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(export_widget)
         
         content_splitter.addWidget(right_widget)
-        content_splitter.setSizes([600, 800])
+        self.content_splitter = content_splitter
+        self.right_widget = right_widget
+        content_splitter.setStretchFactor(0, 3)
+        content_splitter.setStretchFactor(1, 2)
+        content_splitter.setSizes([900, 520])
         
         main_layout.addWidget(content_splitter, 1)
         
         self.statusBar().showMessage("就绪 | 点击「网络工具」菜单使用网络工具箱")
         self._apply_form_layout_polish()
+
+    def toggle_preview_panel(self):
+        """折叠/展开右侧配置预览区"""
+        if self.right_widget.isVisible():
+            self.right_widget.hide()
+            self.toggle_preview_btn.setText("⟨ 展开")
+        else:
+            self.right_widget.show()
+            self.toggle_preview_btn.setText("⟩ 收起")
 
     def _apply_form_layout_polish(self):
         """统一打磨全窗口表单与卡片（一处代码覆盖所有 tab）：
