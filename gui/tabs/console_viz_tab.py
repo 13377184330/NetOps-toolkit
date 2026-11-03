@@ -132,60 +132,62 @@ class ConsoleVizTab(QWidget):
         self.progress_label.setStyleSheet("color: #7A8699; font-size: 12px;")
         layout.addWidget(self.progress_label)
 
-        # 可视化区：上=信息树（全宽、主视觉 3/5 高度），下=日志(窄)+原文(宽)
+        # ===== 单栏到底：配置概览 → 健康度 → 采集日志 → 配置原文（上下排列，不左右拉）=====
         tree_group = QGroupBox("配置概览（分层）")
+        tree_group.setMinimumHeight(260)
         tree_lay = QVBoxLayout(tree_group)
         tree_lay.setContentsMargins(12, 24, 12, 12)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["项目", "值/详情"])
         self.tree.setColumnWidth(0, 260)
         self.tree.setAlternatingRowColors(True)
-        self.tree.setStyleSheet("QTreeWidget::item { padding: 7px 4px; }")  # 行高充足不压抑
+        self.tree.setStyleSheet("QTreeWidget::item { padding: 8px 4px; }")  # 行高充足不压抑
         tree_lay.addWidget(self.tree)
+        layout.addWidget(tree_group, 4)
 
-        # 健康度诊断卡片（与配置概览并排：左树、右体检）
-        mid_row = QHBoxLayout()
-        mid_row.setSpacing(14)
-        mid_row.addWidget(tree_group, 5)
-
+        # 健康度卡片（横向内部布局：左评分、右风险列表——省高度装下更多内容）
         health_group = QGroupBox("配置健康度")
-        health_lay = QVBoxLayout(health_group)
-        health_lay.setContentsMargins(12, 24, 12, 12)
-        health_lay.setSpacing(10)
+        health_group.setMinimumHeight(170)
+        health_lay = QHBoxLayout(health_group)
+        health_lay.setContentsMargins(16, 24, 16, 12)
+        health_lay.setSpacing(18)
 
+        score_box = QVBoxLayout()
+        score_box.setSpacing(2)
         self.health_score = QLabel("--")
         self.health_score.setAlignment(Qt.AlignCenter)
-        self.health_score.setStyleSheet("font-size: 40px; font-weight: bold; color: #9AA7B8;")
-        health_lay.addWidget(self.health_score)
-
+        self.health_score.setStyleSheet("font-size: 48px; font-weight: bold; color: #9AA7B8;")
+        score_box.addWidget(self.health_score)
         self.health_level = QLabel("未体检")
         self.health_level.setAlignment(Qt.AlignCenter)
-        self.health_level.setStyleSheet("font-size: 13px; color: #7A8699;")
-        health_lay.addWidget(self.health_level)
+        self.health_level.setWordWrap(True)
+        self.health_level.setStyleSheet("font-size: 12px; color: #7A8699;")
+        score_box.addWidget(self.health_level)
+        score_box.addStretch()
+        health_lay.addLayout(score_box, 1)
 
         self.health_list = QTreeWidget()
         self.health_list.setHeaderLabels(["风险项", "等级"])
-        self.health_list.setColumnWidth(0, 170)
+        self.health_list.setColumnWidth(0, 260)
         self.health_list.setAlternatingRowColors(True)
-        self.health_list.setStyleSheet("QTreeWidget::item { padding: 5px 3px; }")
-        health_lay.addWidget(self.health_list, 1)
-        mid_row.addWidget(health_group, 2)
-        layout.addLayout(mid_row, 4)   # 中部主视觉（树 + 体检）占大头
+        self.health_list.setStyleSheet("QTreeWidget::item { padding: 6px 3px; }")
+        health_lay.addWidget(self.health_list, 3)
+        layout.addWidget(health_group, 2)
 
-        # 底部独立行：日志窄(1) + 原文宽(2)——文本框给足高度，内容看得全
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(14)
-
+        # 采集日志（固定较小高度：只是操作记录）
         log_group = QGroupBox("采集日志")
+        log_group.setMaximumHeight(150)
         log_lay = QVBoxLayout(log_group)
         log_lay.setContentsMargins(12, 24, 12, 12)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
         log_lay.addWidget(self.log_view)
-        bottom_row.addWidget(log_group, 1)
+        layout.addWidget(log_group)
 
+        # 配置原文（最大区域：文本内容要看得全）
         raw_group = QGroupBox("配置原文（running-configuration）")
+        raw_group.setMinimumHeight(240)
         raw_lay = QVBoxLayout(raw_group)
         raw_lay.setContentsMargins(12, 24, 12, 12)
         raw_lay.setSpacing(8)
@@ -201,9 +203,7 @@ class ConsoleVizTab(QWidget):
         raw_btn_row.addStretch()
         raw_btn_row.addWidget(save_btn)
         raw_lay.addLayout(raw_btn_row)
-        bottom_row.addWidget(raw_group, 2)
-
-        layout.addLayout(bottom_row, 3)   # 底部（日志+原文）也给足留白
+        layout.addWidget(raw_group, 5)
 
         self._last_result = None
         self._raw_config = ""

@@ -133,15 +133,20 @@ class DeviceOpsTab(QWidget):
 
     def initUI(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
 
         splitter = QSplitter(Qt.Vertical)
+        splitter.setHandleWidth(6)
+        splitter.setChildrenCollapsible(False)   # 各区域不被拖没
         layout.addWidget(splitter)
 
-        # 上半：设备清单
+        # 上半：设备清单（表格要高，能看全多台设备）
         top_group = QGroupBox("设备清单（凭据本地加密存储于 config/devices.json）")
+        top_group.setMinimumHeight(240)
         top_layout = QVBoxLayout(top_group)
+        top_layout.setContentsMargins(14, 26, 14, 14)
+        top_layout.setSpacing(10)
 
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(["ID", "名称", "管理IP", "端口", "厂商", "型号", "备注"])
@@ -155,9 +160,10 @@ class DeviceOpsTab(QWidget):
         # 型号/备注列自动伸缩填满，避免固定总宽超出视口
         header.setSectionResizeMode(5, QHeaderView.Stretch)
         header.setSectionResizeMode(6, QHeaderView.Stretch)
-        self.table.setMinimumHeight(160)
+        self.table.setMinimumHeight(150)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.verticalHeader().setDefaultSectionSize(38)   # 行高充足、内容好读
         top_layout.addWidget(self.table)
 
         # 按钮行：两排小按钮（窄视口友好），按钮紧凑化
@@ -187,7 +193,10 @@ class DeviceOpsTab(QWidget):
 
         # 下半：命令执行 / 配置下发 / 备份
         ops_group = QGroupBox("真机操作")
+        ops_group.setMinimumHeight(230)
         ops_layout = QVBoxLayout(ops_group)
+        ops_layout.setContentsMargins(14, 26, 14, 14)
+        ops_layout.setSpacing(10)
 
         cmd_row = QHBoxLayout()
         cmd_row.setSpacing(8)
@@ -215,25 +224,28 @@ class DeviceOpsTab(QWidget):
         self.deploy_input = QTextEdit()
         self.deploy_input.setPlaceholderText(
             "粘贴要下发的配置命令（每行一条，# 开头的注释行自动忽略）——可以直接用上方各配置页「生成」出的配置")
-        self.deploy_input.setMaximumHeight(120)
-        ops_layout.addWidget(self.deploy_input)
+        self.deploy_input.setMinimumHeight(90)   # 贴配置时看得清
+        ops_layout.addWidget(self.deploy_input, 1)
 
         self.deploy_btn.clicked.connect(self.deploy_config)
         self.backup_btn.clicked.connect(self.backup_config)
 
         splitter.addWidget(ops_group)
 
-        # 输出日志
+        # 输出日志（给足高度：日志要看全）
         log_group = QGroupBox("执行结果")
+        log_group.setMinimumHeight(200)
         log_layout = QVBoxLayout(log_group)
+        log_layout.setContentsMargins(14, 26, 14, 14)
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         log_layout.addWidget(self.output)
         splitter.addWidget(log_group)
 
-        splitter.setStretchFactor(0, 5)
-        splitter.setStretchFactor(1, 3)
-        splitter.setStretchFactor(2, 4)
+        splitter.setStretchFactor(0, 4)   # 设备清单
+        splitter.setStretchFactor(1, 3)   # 真机操作
+        splitter.setStretchFactor(2, 3)   # 执行结果
+        splitter.setSizes([300, 250, 250])
 
     # ---------------- 工具方法 ----------------
     def log(self, text):

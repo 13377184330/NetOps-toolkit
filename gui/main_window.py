@@ -280,9 +280,11 @@ class MainWindow(QMainWindow):
 
         # 配置生成页自带子页滚动区，不再重复外包（防宽度需求叠算出横向溢出）
         self.tab_widget.addTab(self.config_gen_page, "配置生成")
-        self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
+        # 运维/可视化页内容较高：包滚动区（保证各卡片最小高，不被压扁）
+        from gui.widget_utils import scroll_wrap as _sw
+        self.tab_widget.addTab(_sw(self.tabs["device_ops"]), "设备运维")
         self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
-        self.tab_widget.addTab(self.tabs["console_viz"], "Console 可视化")
+        self.tab_widget.addTab(_sw(self.tabs["console_viz"]), "Console 可视化")
         # 页面切换时：配置页带预览区、运维/Console 页独占全宽
         self.tab_widget.currentChanged.connect(self._on_page_changed)
         self._preview_collapsed = False
