@@ -42,17 +42,11 @@ class NetworkToolsWindow(QMainWindow):
     def initUI(self):
         self.setWindowTitle("NetOps Toolkit - 网络工具箱")
         self.setMinimumSize(820, 600)
-        # 按屏幕可用区自适应（占 65%/72%），与主窗口同一套适配策略
-        from PyQt5.QtGui import QGuiApplication
-        screen = QGuiApplication.primaryScreen()
-        if screen is not None:
-            avail = screen.availableGeometry()
-            w = min(int(avail.width() * 0.65), 1100)
-            h = min(int(avail.height() * 0.72), 760)
-            self.resize(w, h)
-            self.move(avail.center().x() - w // 2, avail.center().y() - h // 2)
-        else:
-            self.resize(1000, 720)
+        # 固定尺寸 + 固定位置（不依赖 availableGeometry：DPI 感知模式下它返回物理/逻辑像素
+        # 不一致，按比例计算会把窗口推出屏幕）
+        self.setMinimumSize(760, 520)   # 明确最小尺寸，防内容把窗口撑超出屏幕
+        self.resize(980, 660)
+        self.move(90, 70)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window | Qt.WindowSystemMenuHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -162,7 +156,8 @@ class NetworkToolsWindow(QMainWindow):
         """功能卡片：图标 + 名称 + 简介，整卡可点"""
         card = QPushButton()
         card.setCursor(Qt.PointingHandCursor)
-        card.setMinimumHeight(96)
+        card.setMinimumHeight(88)
+        card.setMaximumHeight(104)   # 固定卡高，描述不折行撑爆布局
         card.setStyleSheet("""
             QPushButton {
                 background: #FFFFFF; border: 1px solid #E5EAF2;
@@ -184,7 +179,7 @@ class NetworkToolsWindow(QMainWindow):
         n.setStyleSheet("font-size: 14px; font-weight: bold; color: #1F2A37; background: transparent;")
         d = QLabel(desc)
         d.setStyleSheet("font-size: 12px; color: #7A8699; background: transparent;")
-        d.setWordWrap(True)
+        d.setWordWrap(False)   # 单行不折行（防小窗口下高度膨胀）
         col.addWidget(n)
         col.addWidget(d)
         lay.addLayout(col, 1)
