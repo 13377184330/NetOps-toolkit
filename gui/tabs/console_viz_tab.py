@@ -13,8 +13,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
 from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 
-from modules import console_reader as cr
 from modules import config_visualizer as cv
+from modules import console_reader as cr
 from modules.device_connector import VENDOR_LABELS
 
 
@@ -37,7 +37,8 @@ class _ConsoleWorker(QThread):
         self.baud = baud
 
     def run(self):
-        result = {"vendor": None, "version": "", "config": "", "parsed": None, "lldp": ""}
+        result = {"vendor": None, "version": "", "config": "", "parsed": None,
+                  "lldp": "", "mac": "", "arp": "", "health": None}
         try:
             self.log.emit(f"[Console] 打开 {self.port} @ {self.baud} …")
             with cr.ConsoleReader(self.port, self.baud) as reader:
@@ -59,11 +60,22 @@ class _ConsoleWorker(QThread):
                 result["config"] = reader.read_config(progress_cb=on_rcv)
                 self.progress.emit(80, "解析配置…")
                 result["parsed"] = cv.parse_config(result["config"])
-                self.progress.emit(88, "采集 LLDP 邻居（拓扑用）…")
+                self.progress.emit(84, "采集 LLDP 邻居（拓扑用）…")
                 try:
                     result["lldp"] = reader.read_lldp()
                 except Exception as e:
                     self.log.emit(f"[Console] LLDP 采集跳过：{e}")
+                # MAC 地址表 + ARP 表：终端（PC）不回应 LLDP，只能靠这两张表发现
+                self.progress.emit(90, "采集 MAC 地址表（发现接在端口上的终端）…")
+                try:
+                    result["mac"] = reader.read_mac_table()
+                except Exception as e:
+                    self.log.emit(f"[Console] MAC 表采集跳过：{e}")
+                self.progress.emit(95, "采集 ARP 表（给终端补 IP）…")
+                try:
+                    result["arp"] = reader.read_arp()
+                except Exception as e:
+                    self.log.emit(f"[Console] ARP 表采集跳过：{e}")
                 self.progress.emit(100, "完成")
                 self.log.emit(f"[Console] 抓取完成：{len(result['config'])} 字节配置")
                 self.done.emit(True, result)
@@ -249,6 +261,20 @@ class ConsoleVizTab(QWidget):
         self._last_result = None
         self._raw_config = ""
 
+    # ---------------- 契约方法（主窗口切换品牌时会调用） ----------------
+    def clear_config(self):
+        """清空采集结果（不连接、不报错；串口选择与波特率保留）"""
+        self.tree.clear()
+        self.health_list.clear()
+        self.raw_view.clear()
+        self.log_view.clear()
+        self.health_score.setText("--")
+        self.health_score.setStyleSheet("font-size: 40px; font-weight: bold; color: #9AA7B8;")
+        self.health_level.setText("未体检")
+        self.health_level.setStyleSheet("font-size: 12px; color: #7A8699;")
+        self._last_result = None
+        self._raw_config = ""
+
     # ---------------- 逻辑 ----------------
     def refresh_ports(self):
         self.port_combo.clear()
@@ -294,8 +320,8 @@ class ConsoleVizTab(QWidget):
         self.raw_view.setPlainText(result["config"])
         self._build_tree(result)
         self._sync_brand_combo(result.get("vendor"))
-        self._sync_topology(result)
         self._build_health(result)
+        self._sync_topology(result)   # 体检结果已写入 result，拓扑面板可直接用
 
     def _build_health(self, result):
         """配置健康度体检（本地规则分析，不发任何命令）"""
@@ -313,6 +339,11 @@ class ConsoleVizTab(QWidget):
                 f"{level}　严重 {st['严重']} · 警告 {st['警告']} · 提示 {st['提示']} · 通过 {st['通过']}")
             self.health_level.setStyleSheet(f"font-size: 12px; color: {color};")
 
+            try:
+                result["health"] = {"score": score, "level": level,
+                                    "stats": res["stats"], "items": res["items"]}
+            except Exception:
+                pass
             self.health_list.clear()
             level_color = {"严重": "#FA5151", "警告": "#FA9D3B", "提示": "#7A8699", "通过": "#34C759"}
             order = {"严重": 0, "警告": 1, "提示": 2, "通过": 3}
@@ -338,14 +369,31 @@ class ConsoleVizTab(QWidget):
                 return
             lldp_text = result.get("lldp") or ""
             neighbors = cv.parse_lldp(lldp_text)
+            # 终端发现：MAC 表（谁接在哪个口）+ ARP 表（补 IP）
+            mac_rows = cv.parse_mac_table(result.get("mac") or "")
+            arp_rows = cv.parse_arp(result.get("arp") or "")
+            hosts = cv.merge_end_hosts(mac_rows, arp_rows)
             parsed_basic = result.get("parsed", {}).get("basic", {})
             local_name = parsed_basic.get("主机名", "")
+            vendor = result.get("vendor") or ""
             local_meta = {
                 "版本": parsed_basic.get("软件版本", ""),
-                "厂商": VENDOR_LABELS.get(result.get("vendor") or "", ""),
+                "厂商": VENDOR_LABELS.get(vendor, ""),
+                "接口数": str(result.get("parsed", {}).get("stats", {}).get("接口数", "")),
+                "VLAN 数": str(result.get("parsed", {}).get("stats", {}).get("VLAN 数", "")),
             }
-            topo.load_topology(local_name, local_meta, neighbors)
-            self.log(f"[拓扑] 已更新网络拓扑：发现 {len(neighbors)} 台 LLDP 邻居")
+            local_meta = {k: v for k, v in local_meta.items() if v}
+            topo.load_topology(
+                local_name, local_meta, neighbors,
+                end_hosts=hosts,
+                parsed=result.get("parsed"),
+                raw_config=result.get("config", ""),
+                console_port=self.port_combo.currentData() or "",
+                vendor=VENDOR_LABELS.get(vendor, ""),
+                health=result.get("health"),
+            )
+            self.log(f"[拓扑] 已更新：LLDP 邻居 {len(neighbors)} 台，"
+                     f"终端（MAC 表）{len(hosts)} 台")
         except Exception as e:
             self.log(f"[拓扑] 更新失败：{e}")
 

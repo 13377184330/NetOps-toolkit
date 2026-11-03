@@ -150,6 +150,22 @@ VENDOR_LLDP_CMD = {
     "cisco": "show lldp neighbors",
 }
 
+# MAC 地址表 / ARP 表（拓扑发现终端设备用，均只读）
+VENDOR_MAC_CMD = {
+    "huawei": "display mac-address",
+    "h3c": "display mac-address",
+    "ruijie": "show mac-address-table",
+    "maipu": "show mac-address-table",
+    "cisco": "show mac address-table",
+}
+VENDOR_ARP_CMD = {
+    "huawei": "display arp",
+    "h3c": "display arp",
+    "ruijie": "show arp",
+    "maipu": "show arp",
+    "cisco": "show arp",
+}
+
 
 def _send(ser, command: str, allow_write: bool = False):
     """命令发送出口。allow_write=False 时强校验只读（安全默认）；
@@ -239,6 +255,20 @@ class ConsoleReader:
         if self.vendor is None:
             self.detect()
         cmd = VENDOR_LLDP_CMD.get(self.vendor, "display lldp neighbor-information verbose")
+        return self._exec(cmd, max_wait=25)
+
+    def read_mac_table(self):
+        """抓取 MAC 地址表（只读）——用于发现各接口下挂的终端设备"""
+        if self.vendor is None:
+            self.detect()
+        cmd = VENDOR_MAC_CMD.get(self.vendor, "display mac-address")
+        return self._exec(cmd, max_wait=30)
+
+    def read_arp(self):
+        """抓取 ARP 表（只读）——为终端设备补 IP 信息"""
+        if self.vendor is None:
+            self.detect()
+        cmd = VENDOR_ARP_CMD.get(self.vendor, "display arp")
         return self._exec(cmd, max_wait=25)
 
     # ---------------- 配置下发（需显式 allow_write） ----------------

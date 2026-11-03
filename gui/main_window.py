@@ -735,7 +735,8 @@ class MainWindow(QMainWindow):
             "huawei": ("华为交换机配置脚本生成工具", "华为", "Huawei"),
             "h3c": ("H3C华三交换机配置脚本生成工具", "H3C", "H3C"),
             "ruijie": ("锐捷交换机配置脚本生成工具", "锐捷", "Ruijie"),
-            "maipu": ("迈普交换机配置脚本生成工具", "迈普", "Maipu")
+            "maipu": ("迈普交换机配置脚本生成工具", "迈普", "Maipu"),
+            "cisco": ("思科交换机配置脚本生成工具", "思科", "Cisco"),
         }
         
         title, name, _ = device_names[self.current_device_type]

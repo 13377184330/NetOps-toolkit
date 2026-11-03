@@ -196,6 +196,113 @@ def parse_lldp(text: str) -> list[dict]:
     return neighbors
 
 
+# ---------------------------------------------------------------- MAC / ARP（终端发现）
+# 说明：LLDP 只能发现"支持且开启了 LLDP"的设备（网管型交换机、路由器），
+# 而 Windows/手机等终端从不应答 LLDP。要看见接在端口上的 PC，必须查 MAC 地址表。
+_MAC_RE = re.compile(
+    r"\b([0-9a-fA-F]{4}[-:][0-9a-fA-F]{4}[-:][0-9a-fA-F]{4}"      # 0023-8912-3456 / 0023:8912:3456
+    r"|[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}"             # 0023.8912.3456（思科）
+    r"|[0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})\b"                  # 00:23:89:12:34:56
+)
+
+# 端口名：GigabitEthernet1/0/5、GE1/0/5、Gi1/0/5、Eth0/1、BAGG1、1/0/5 ……
+# 注意：长名必须排在短名前（否则 GigabitEthernet 会被 Gi 截断），且必须以数字结尾
+_PORT_RE = re.compile(
+    r"\b((?:GigabitEthernet|Ten-GigabitEthernet|FortyGigE|FastEthernet|Ethernet"
+    r"|Bridge-Aggregation|Port-channel|Vlan-interface|Vlanif"
+    r"|XGE|BAGG|GE|Gi|Eth|Fa|Te|Po)[\d/.:]*\d"
+    r"|\d+/\d+/\d+)\b",
+    re.I,
+)
+
+_VIRTUAL_PORTS = ("cpu", "null", "vlan", "register", "route")  # 非物理口，拓扑不画
+
+
+def _norm_mac(value: str) -> str:
+    d = re.sub(r"[^0-9a-fA-F]", "", value or "").lower()
+    return d if len(d) == 12 else ""
+
+
+def _pick_vlan(text: str) -> str:
+    for m in re.finditer(r"\b(\d{1,4})\b", text):
+        v = int(m.group(1))
+        if 1 <= v <= 4094:
+            return str(v)
+    return ""
+
+
+def parse_mac_table(text: str) -> list[dict]:
+    """解析 MAC 地址表 → [{mac, mac_display, port, vlan}]
+    兼容 H3C「display mac-address」、华为「display mac-address」、
+    思科/锐捷「show mac address-table」
+    """
+    rows = []
+    if not text:
+        return rows
+    seen = set()
+    for line in text.splitlines():
+        m = _MAC_RE.search(line)
+        if not m:
+            continue
+        mac = _norm_mac(m.group(1))
+        if not mac or mac in ("000000000000", "ffffffffffff"):
+            continue
+        after = line[m.end():]
+        pm = _PORT_RE.search(after)
+        if not pm:
+            continue
+        port = pm.group(1)
+        if any(port.lower().startswith(v) for v in _VIRTUAL_PORTS):
+            continue
+        # VLAN：端口列之前找；思科格式 VLAN 在 MAC 之前
+        vlan = _pick_vlan(after[:pm.start()]) or _pick_vlan(line[:m.start()])
+        key = (mac, port, vlan)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"mac": mac, "mac_display": _mac_display(mac),
+                     "port": port, "vlan": vlan})
+    return rows
+
+
+def _mac_display(norm: str) -> str:
+    return "-".join(norm[i:i + 2] for i in range(0, 12, 2)).upper()
+
+
+def parse_arp(text: str) -> list[dict]:
+    """解析 ARP 表 → [{ip, mac}]（给终端补 IP，便于 Ping / 定位）"""
+    rows = []
+    if not text:
+        return rows
+    for line in text.splitlines():
+        im = re.match(r"\s*(\d{1,3}(?:\.\d{1,3}){3})\s", line)
+        if not im:
+            continue
+        mm = _MAC_RE.search(line)
+        if not mm:
+            continue
+        mac = _norm_mac(mm.group(1))
+        if not mac or mac in ("000000000000", "ffffffffffff"):
+            continue
+        rows.append({"ip": im.group(1), "mac": mac})
+    return rows
+
+
+def merge_end_hosts(mac_rows: list[dict], arp_rows: list[dict]) -> list[dict]:
+    """MAC 表 + ARP 表 → 终端清单 [{mac, mac_display, ip, port, vlan}]"""
+    ip_map = {r["mac"]: r["ip"] for r in (arp_rows or [])}
+    hosts = []
+    for r in mac_rows or []:
+        hosts.append({
+            "mac": r["mac"],
+            "mac_display": r.get("mac_display") or _mac_display(r["mac"]),
+            "ip": ip_map.get(r["mac"], ""),
+            "port": r.get("port", ""),
+            "vlan": r.get("vlan", ""),
+        })
+    return hosts
+
+
 # ---------------------------------------------------------------- 汇总
 def parse_config(text: str) -> dict:
     """主入口：配置文本 → 可视化数据结构"""
