@@ -63,16 +63,7 @@ class NetworkToolsWindow(QMainWindow):
         self.title_bar = FramelessTitleBar("网络工具箱", self)
         main_layout.addWidget(self.title_bar)
 
-        header = QLabel("🧰 网络工具箱")
-        header.setStyleSheet("""
-            font-size: 24px;
-            font-weight: bold;
-            color: #1F2A37;
-            padding: 4px;
-            background: transparent;
-        """)
-        header.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(header)
+        # 注：“网络工具箱”大标题已移入首页（工具子页不再占用标题行）
 
         # ===== 两级结构：首页功能卡片网格 → 点击进入具体工具 =====
         self.stack = QStackedWidget()
@@ -97,6 +88,15 @@ class NetworkToolsWindow(QMainWindow):
         home_lay = QVBoxLayout(home)
         home_lay.setContentsMargins(0, 0, 0, 0)
         home_lay.setSpacing(12)
+
+        # 大标题只在首页展示（子页不占标题行）
+        home_header = QLabel("🧰 网络工具箱")
+        home_header.setStyleSheet("""
+            font-size: 24px; font-weight: bold; color: #1F2A37;
+            padding: 4px; background: transparent;
+        """)
+        home_header.setAlignment(Qt.AlignCenter)
+        home_lay.addWidget(home_header)
 
         hint = QLabel("选择一个工具开始使用")
         hint.setStyleSheet("color: #7A8699; font-size: 13px; padding-left: 2px;")
@@ -136,7 +136,9 @@ class NetworkToolsWindow(QMainWindow):
             bar.addStretch()
             p_lay.addLayout(bar)
 
-            p_lay.addWidget(widget_cls(), 1)
+            # 工具内容包滚动区：内容高时滚动，不被压缩（各工具内部布局保持原尺寸）
+            from gui.widget_utils import scroll_wrap
+            p_lay.addWidget(scroll_wrap(widget_cls()), 1)
             self.stack.addWidget(page)
             self._tool_pages.append(page)
 
