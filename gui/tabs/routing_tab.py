@@ -22,7 +22,7 @@ class RoutingConfigTab(QWidget):
         self.initUI()
     
     def initUI(self):
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         
         left_panel = QVBoxLayout()
         
@@ -114,8 +114,7 @@ class RoutingConfigTab(QWidget):
         ospf_group.setLayout(ospf_layout)
         left_panel.addWidget(ospf_group)
         
-        left_panel.addStretch()
-        layout.addLayout(left_panel, 1)
+        layout.addLayout(left_panel, 0)
         
         right_panel = QVBoxLayout()
         

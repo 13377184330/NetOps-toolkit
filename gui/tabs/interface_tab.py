@@ -29,7 +29,7 @@ class InterfaceConfigTab(QWidget):
         scroll.setFrameShape(QFrame.NoFrame)
         
         container = QWidget()
-        layout = QHBoxLayout(container)
+        layout = QVBoxLayout(container)
         
         left_panel = QVBoxLayout()
         left_panel.setSpacing(15)
@@ -140,8 +140,7 @@ class InterfaceConfigTab(QWidget):
         loop_group.setLayout(loop_layout)
         left_panel.addWidget(loop_group)
         
-        left_panel.addStretch()
-        layout.addLayout(left_panel, 1)
+        layout.addLayout(left_panel, 0)
         
         right_panel = QVBoxLayout()
         right_panel.setSpacing(15)

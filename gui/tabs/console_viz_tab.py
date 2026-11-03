@@ -170,9 +170,9 @@ class ConsoleVizTab(QWidget):
         self.health_list.setStyleSheet("QTreeWidget::item { padding: 5px 3px; }")
         health_lay.addWidget(self.health_list, 1)
         mid_row.addWidget(health_group, 2)
-        layout.addLayout(mid_row, 3)   # 中部主视觉（树 + 体检）
+        layout.addLayout(mid_row, 4)   # 中部主视觉（树 + 体检）占大头
 
-        # 底部独立行：日志窄(1) + 原文宽(2)——原文要多看，日志只需瞥一眼
+        # 底部独立行：日志窄(1) + 原文宽(2)——文本框给足高度，内容看得全
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(14)
 
@@ -203,7 +203,7 @@ class ConsoleVizTab(QWidget):
         raw_lay.addLayout(raw_btn_row)
         bottom_row.addWidget(raw_group, 2)
 
-        layout.addLayout(bottom_row, 2)
+        layout.addLayout(bottom_row, 3)   # 底部（日志+原文）也给足留白
 
         self._last_result = None
         self._raw_config = ""

@@ -23,7 +23,7 @@ class VLANConfigTab(QWidget):
         self.initUI()
     
     def initUI(self):
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         
         left_panel = QVBoxLayout()
         
@@ -102,8 +102,7 @@ class VLANConfigTab(QWidget):
         interface_group.setLayout(iface_layout)
         left_panel.addWidget(interface_group)
         
-        left_panel.addStretch()
-        layout.addLayout(left_panel, 1)
+        layout.addLayout(left_panel, 0)
         
         right_panel = QVBoxLayout()
         
