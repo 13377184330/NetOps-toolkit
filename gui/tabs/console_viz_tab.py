@@ -10,11 +10,17 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QPushButton, QLabel,
                              QTreeWidget, QTreeWidgetItem, QTextEdit,
                              QMessageBox, QProgressBar, QSpinBox)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 
 from modules import console_reader as cr
 from modules import config_visualizer as cv
 from modules.device_connector import VENDOR_LABELS
+
+
+# 识别厂商 → 设备品牌下拉索引映射（右上角厂商联动）
+VENDOR_TO_BRAND_INDEX = {
+    "huawei": 0, "h3c": 1, "ruijie": 2, "maipu": 3, "cisco": 4,
+}
 
 
 # ---------------------------------------------------------------- 后台读取线程
@@ -75,24 +81,23 @@ class ConsoleVizTab(QWidget):
     # ---------------- UI ----------------
     def initUI(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(14)
 
-        # 顶部说明条（红线声明）
-        banner = QLabel("🔒 只读模式：本页面仅发送 display/show 查询命令，"
-                        "任何写操作（system-view/save/undo 等）在连接层被强制拦截")
+        # 顶部说明条（红线声明）——更紧凑的一行样式
+        banner = QLabel("🔒 只读模式：仅发送 display/show 查询命令，任何写操作在连接层被强制拦截")
         banner.setStyleSheet("""
             background: #FFF7E8; color: #B26A00;
-            border: 1px solid #FFD591; border-radius: 10px;
-            padding: 9px 14px; font-size: 13px;
+            border: 1px solid #FFD591; border-radius: 8px;
+            padding: 6px 12px; font-size: 12px;
         """)
-        banner.setWordWrap(True)
         layout.addWidget(banner)
 
-        # 连接卡
+        # 连接卡（控件间放宽间隔 + 弹性分配，不挤左边）
         conn_group = QGroupBox("Console 连接")
         conn_form = QHBoxLayout()
-        conn_form.setSpacing(10)
+        conn_form.setSpacing(16)
+        conn_form.setContentsMargins(16, 8, 16, 8)
 
         self.port_combo = QComboBox()
         self.refresh_ports()
@@ -110,10 +115,13 @@ class ConsoleVizTab(QWidget):
         self.connect_btn.clicked.connect(self.start_read)
 
         conn_form.addWidget(QLabel("串口:"))
-        conn_form.addWidget(self.port_combo, 1)
+        conn_form.addWidget(self.port_combo, 2)
+        conn_form.addStretch(1)
         conn_form.addWidget(QLabel("波特率:"))
         conn_form.addWidget(self.baud_spin)
+        conn_form.addStretch(1)
         conn_form.addWidget(refresh_btn)
+        conn_form.addStretch(2)
         conn_form.addWidget(self.connect_btn)
         conn_group.setLayout(conn_form)
         layout.addWidget(conn_group)
@@ -127,22 +135,25 @@ class ConsoleVizTab(QWidget):
         self.progress_label.setStyleSheet("color: #7A8699; font-size: 12px;")
         layout.addWidget(self.progress_label)
 
-        # 可视化区：上=信息树（全宽独占），下=日志+配置原文（独立整行，看得全）
+        # 可视化区：上=信息树（全宽、主视觉 3/5 高度），下=日志(窄)+原文(宽)
         tree_group = QGroupBox("配置概览（分层）")
         tree_lay = QVBoxLayout(tree_group)
+        tree_lay.setContentsMargins(12, 24, 12, 12)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["项目", "值/详情"])
         self.tree.setColumnWidth(0, 260)
         self.tree.setAlternatingRowColors(True)
+        self.tree.setStyleSheet("QTreeWidget::item { padding: 7px 4px; }")  # 行高充足不压抑
         tree_lay.addWidget(self.tree)
-        layout.addWidget(tree_group, 3)   # 树占大头
+        layout.addWidget(tree_group, 3)   # 树占主视觉（3 : 2）
 
-        # 底部独立行：左日志 + 右原文（各占一半，宽度充足看得全）
+        # 底部独立行：日志窄(1) + 原文宽(3)——原文要多看，日志只需瞥一眼
         bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(10)
+        bottom_row.setSpacing(14)
 
         log_group = QGroupBox("采集日志")
         log_lay = QVBoxLayout(log_group)
+        log_lay.setContentsMargins(12, 24, 12, 12)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
@@ -151,10 +162,12 @@ class ConsoleVizTab(QWidget):
 
         raw_group = QGroupBox("配置原文（running-configuration）")
         raw_lay = QVBoxLayout(raw_group)
+        raw_lay.setContentsMargins(12, 24, 12, 12)
+        raw_lay.setSpacing(8)
         self.raw_view = QTextEdit()
         self.raw_view.setReadOnly(True)
         self.raw_view.setPlaceholderText("配置原文显示在这里（全宽展示，看得全）")
-        raw_lay.addWidget(self.raw_view)
+        raw_lay.addWidget(self.raw_view, 1)
 
         raw_btn_row = QHBoxLayout()
         save_btn = QPushButton("💾 保存配置文件（.cfg）")
@@ -214,6 +227,24 @@ class ConsoleVizTab(QWidget):
         self._raw_config = result["config"]
         self.raw_view.setPlainText(result["config"])
         self._build_tree(result)
+        self._sync_brand_combo(result.get("vendor"))
+
+    def _sync_brand_combo(self, vendor):
+        """厂商联动：Console 识别出厂商后，自动同步右上角设备品牌下拉
+        （可视化运维逻辑：设备自己“告诉”工具它是什么，不用人手选）"""
+        if not vendor:
+            return
+        main = self.window()
+        combo = getattr(main, "device_combo", None)
+        if combo is None:
+            return
+        idx = VENDOR_TO_BRAND_INDEX.get(vendor)
+        if idx is not None and idx < combo.count():
+            if combo.currentIndex() != idx:
+                combo.blockSignals(True)   # 防重入：不触发 on_device_changed 清空表单
+                combo.setCurrentIndex(idx)
+                combo.blockSignals(False)
+                self.log(f"[联动] 已自动切换设备品牌：{VENDOR_LABELS.get(vendor, vendor)}（右侧配置页语法已同步）")
 
     # ---------------- 可视化树构建 ----------------
     def _build_tree(self, result: dict):

@@ -174,7 +174,7 @@ class MainWindow(QMainWindow):
         self.title_bar = FramelessTitleBar("NetOps Toolkit", self)
         # 设备品牌下拉并入标题栏右侧（与右侧窗口边界同行，省一整行）
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["华为 Huawei", "华三 H3C", "锐捷 Ruijie", "迈普 Maipu"])
+        self.device_combo.addItems(["华为 Huawei", "华三 H3C", "锐捷 Ruijie", "迈普 Maipu", "思科 Cisco"])
         self.device_combo.currentIndexChanged.connect(self.on_device_changed)
         self.device_combo.setMinimumWidth(130)
         self.device_combo.setStyleSheet("""
@@ -696,7 +696,7 @@ class MainWindow(QMainWindow):
     
     def on_device_changed(self, index):
         """设备类型切换"""
-        device_types = ["huawei", "h3c", "ruijie", "maipu"]
+        device_types = ["huawei", "h3c", "ruijie", "maipu", "cisco"]
         self.current_device_type = device_types[index]
         
         device_names = {
