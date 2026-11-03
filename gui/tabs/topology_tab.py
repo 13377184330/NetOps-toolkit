@@ -55,6 +55,16 @@ class DeviceNode(QGraphicsEllipseItem):
                 scene.refresh_links()
         return super().itemChange(change, value)
 
+    def mouseDoubleClickEvent(self, event):
+        """双击节点：通知拓扑页查看该设备（本机可直达配置）"""
+        scene = self.scene()
+        cb = getattr(scene, "on_node_activated", None)
+        if cb:
+            cb(self)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
 
 class TopologyScene(QGraphicsScene):
     """维护节点与连线，节点移动时自动重绘连线"""
@@ -62,6 +72,7 @@ class TopologyScene(QGraphicsScene):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.links = []  # [(node_a, node_b, label)]
+        self.on_node_activated = None  # 节点双击回调（NetBox 式：点开看设备）
 
     def add_link(self, a, b, label=""):
         self.links.append((a, b, label))
@@ -174,17 +185,40 @@ class NetworkTopologyPage(QWidget):
             }
         """)
         self.view.setSceneRect(QRectF(-600, -420, 1200, 840))
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # 画布不显示滚动条（拖动平移）
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.view.wheelEvent = self._zoom_wheel
         canvas_lay.addWidget(self.view)
         layout.addWidget(canvas_group, 1)
 
         # 提示
-        tip = QLabel("💡 操作：拖动节点移动位置 ｜ 滚轮缩放 ｜ 拖动空白处平移 ｜ 悬停节点查看详情")
+        tip = QLabel("💡 操作：拖动节点移动位置 ｜ 滚轮缩放 ｜ 拖动空白处平移 ｜ 双击节点查看该设备配置")
         tip.setStyleSheet("color: #9AA7B8; font-size: 12px;")
         layout.addWidget(tip)
 
+        self.scene.on_node_activated = self._on_node_activated
+
         self._local_node = None
         self._neighbor_nodes = {}
+
+    def _on_node_activated(self, node: "DeviceNode"):
+        """双击节点：本机 → 跳转 Console 可视化页看配置；邻居 → 提示尚未采集"""
+        main = self.window()
+        tabs = getattr(main, "tabs", {})
+        if getattr(node, "_is_local", False):
+            tw = getattr(main, "tab_widget", None)
+            if tw is not None:
+                for i in range(tw.count()):
+                    if tw.tabText(i) == "Console 可视化":
+                        tw.setCurrentIndex(i)
+                        break
+        else:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, f"设备 {node.device_name}",
+                f"「{node.device_name}」的配置尚未采集。\n\n"
+                "请将 Console/SSH 连接到该设备并采集配置后，这里即可查看。\n"
+                f"当前已知信息：\n" + "\n".join(f"{k}: {v}" for k, v in (node.meta or {}).items()))
 
     def _zoom_wheel(self, event):
         factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15

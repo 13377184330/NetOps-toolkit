@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QPushButton, QLabel,
                              QTreeWidget, QTreeWidgetItem, QTextEdit,
                              QMessageBox, QProgressBar, QSpinBox)
+from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 
 from modules import console_reader as cr
@@ -141,9 +142,37 @@ class ConsoleVizTab(QWidget):
         self.tree.setAlternatingRowColors(True)
         self.tree.setStyleSheet("QTreeWidget::item { padding: 7px 4px; }")  # 行高充足不压抑
         tree_lay.addWidget(self.tree)
-        layout.addWidget(tree_group, 3)   # 树占主视觉（3 : 2）
 
-        # 底部独立行：日志窄(1) + 原文宽(3)——原文要多看，日志只需瞥一眼
+        # 健康度诊断卡片（与配置概览并排：左树、右体检）
+        mid_row = QHBoxLayout()
+        mid_row.setSpacing(14)
+        mid_row.addWidget(tree_group, 5)
+
+        health_group = QGroupBox("配置健康度")
+        health_lay = QVBoxLayout(health_group)
+        health_lay.setContentsMargins(12, 24, 12, 12)
+        health_lay.setSpacing(10)
+
+        self.health_score = QLabel("--")
+        self.health_score.setAlignment(Qt.AlignCenter)
+        self.health_score.setStyleSheet("font-size: 40px; font-weight: bold; color: #9AA7B8;")
+        health_lay.addWidget(self.health_score)
+
+        self.health_level = QLabel("未体检")
+        self.health_level.setAlignment(Qt.AlignCenter)
+        self.health_level.setStyleSheet("font-size: 13px; color: #7A8699;")
+        health_lay.addWidget(self.health_level)
+
+        self.health_list = QTreeWidget()
+        self.health_list.setHeaderLabels(["风险项", "等级"])
+        self.health_list.setColumnWidth(0, 170)
+        self.health_list.setAlternatingRowColors(True)
+        self.health_list.setStyleSheet("QTreeWidget::item { padding: 5px 3px; }")
+        health_lay.addWidget(self.health_list, 1)
+        mid_row.addWidget(health_group, 2)
+        layout.addLayout(mid_row, 3)   # 中部主视觉（树 + 体检）
+
+        # 底部独立行：日志窄(1) + 原文宽(2)——原文要多看，日志只需瞥一眼
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(14)
 
@@ -225,6 +254,39 @@ class ConsoleVizTab(QWidget):
         self._build_tree(result)
         self._sync_brand_combo(result.get("vendor"))
         self._sync_topology(result)
+        self._build_health(result)
+
+    def _build_health(self, result):
+        """配置健康度体检（本地规则分析，不发任何命令）"""
+        try:
+            from modules.health_checker import check_health
+            res = check_health(result.get("config", ""), result.get("vendor") or "h3c")
+            score = res["score"]
+            level = res["level"]
+            color = {"优秀": "#34C759", "良好": "#0089FF",
+                     "需改进": "#FA9D3B", "高风险": "#FA5151"}.get(level, "#9AA7B8")
+            self.health_score.setText(str(score))
+            self.health_score.setStyleSheet(f"font-size: 40px; font-weight: bold; color: {color};")
+            st = res["stats"]
+            self.health_level.setText(
+                f"{level}　严重 {st['严重']} · 警告 {st['警告']} · 提示 {st['提示']} · 通过 {st['通过']}")
+            self.health_level.setStyleSheet(f"font-size: 12px; color: {color};")
+
+            self.health_list.clear()
+            level_color = {"严重": "#FA5151", "警告": "#FA9D3B", "提示": "#7A8699", "通过": "#34C759"}
+            order = {"严重": 0, "警告": 1, "提示": 2, "通过": 3}
+            for it in sorted(res["items"], key=lambda x: order.get(x["level"], 9)):
+                if it["level"] == "通过":
+                    continue
+                node = QTreeWidgetItem([f"{it['domain']} · {it['item']}", it["level"]])
+                node.setForeground(1, QBrush(QColor(level_color.get(it["level"], "#7A8699"))))
+                node.setToolTip(0, it["advice"] or it["baseline"])
+                self.health_list.addTopLevelItem(node)
+            if self.health_list.topLevelItemCount() == 0:
+                QTreeWidgetItem(self.health_list, ["全部检查项通过 ✓", "通过"])
+            self.log(f"[体检] 健康度评分 {score}（{level}）")
+        except Exception as e:
+            self.log(f"[体检] 失败：{e}")
 
     def _sync_topology(self, result):
         """Console 采集的 LLDP 邻居 → 自动填充「网络拓扑」页"""

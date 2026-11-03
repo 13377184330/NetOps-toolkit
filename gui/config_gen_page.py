@@ -10,6 +10,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
                              QPushButton, QButtonGroup)
 from PyQt5.QtCore import Qt
 
+from gui.widget_utils import scroll_wrap
+
 
 class ConfigGenPage(QWidget):
     """配置生成聚合页：顶部胶囊二级导航 + 内容堆栈"""
@@ -53,7 +55,8 @@ class ConfigGenPage(QWidget):
             """)
             self._group.addButton(btn, i)
             nav_bar.addWidget(btn)
-            self._stack.addWidget(self._pages[title])
+            # 每个子页各自包滚动区（防止切页后横向需求变化导致外层裁切）
+            self._stack.addWidget(scroll_wrap(self._pages[title]))
         nav_bar.addStretch()
         layout.addLayout(nav_bar)
 

@@ -88,6 +88,72 @@ H3C_TEMPLATES = {
     }
 }
 
+# ---------------- 其余三厂商模板（二开补齐：五厂商全支持）----------------
+def _mk_template(desc, hostname, mgmt_if, ip, pwd, ssh_user):
+    return {
+        "description": desc,
+        "config": {
+            "basic": {
+                "hostname": hostname,
+                "password": {"value": pwd, "encrypted": True},
+                "mgmt_interface": {"interface": mgmt_if, "ip_address": ip, "mask": "255.255.255.0"},
+                "enable_ssh": True,
+                "user": {"username": ssh_user, "password": pwd, "level": 15},
+            }
+        }
+    }
+
+
+RUIJIE_TEMPLATES = {
+    "接入交换机标准配置": _mk_template("锐捷接入层交换机标准配置模板", "Access-SW-01",
+                                   "VLAN 1", "192.168.1.1", "Admin@123", "admin"),
+    "核心交换机配置": _mk_template("锐捷核心层交换机配置模板", "Core-SW-01",
+                                "VLAN 1", "10.0.0.1", "CoreAdmin@123", "admin"),
+}
+
+MAIPU_TEMPLATES = {
+    "接入交换机标准配置": _mk_template("迈普接入层交换机标准配置模板", "Access-SW-01",
+                                   "Vlan1", "192.168.1.1", "Admin@123", "admin"),
+    "核心交换机配置": _mk_template("迈普核心层交换机配置模板", "Core-SW-01",
+                                "Vlan1", "10.0.0.1", "CoreAdmin@123", "admin"),
+}
+
+CISCO_TEMPLATES = {
+    "接入交换机标准配置": _mk_template("思科接入层交换机标准配置模板", "Access-SW-01",
+                                   "Vlan1", "192.168.1.1", "Admin@123", "admin"),
+    "核心交换机配置": _mk_template("思科核心层交换机配置模板", "Core-SW-01",
+                                "Vlan1", "10.0.0.1", "CoreAdmin@123", "admin"),
+}
+
+# 厂商 → 模板集（模板对话框与菜单统一从这里取）
+VENDOR_TEMPLATE_SETS = {
+    "huawei": "HUAWEI",  # 华为走 utils.templates 动态加载
+    "h3c": "H3C",
+    "ruijie": "RUIJIE",
+    "maipu": "MAIPU",
+    "cisco": "CISCO",
+}
+
+TEMPLATE_SET_DICTS = {
+    "H3C": H3C_TEMPLATES,
+    "RUIJIE": RUIJIE_TEMPLATES,
+    "MAIPU": MAIPU_TEMPLATES,
+    "CISCO": CISCO_TEMPLATES,
+}
+
+VENDOR_CN = {"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷", "maipu": "迈普", "cisco": "思科"}
+
+
+def get_vendor_templates(vendor: str):
+    """取某厂商的模板 {名称: {description, config}}"""
+    if vendor == "huawei":
+        from utils.templates import get_template_names, get_template_config
+        out = {}
+        for n in get_template_names():
+            out[n] = {"description": f"华为{n}", "config": get_template_config(n)}
+        return out
+    return TEMPLATE_SET_DICTS.get(VENDOR_TEMPLATE_SETS.get(vendor, "H3C"), H3C_TEMPLATES)
+
 
 class TemplateDialog(QDialog):
     """模板选择对话框"""
@@ -99,7 +165,7 @@ class TemplateDialog(QDialog):
         self.initUI()
     
     def initUI(self):
-        self.setWindowTitle(f"选择{'华为' if self.device_type == 'huawei' else 'H3C'}配置模板")
+        self.setWindowTitle(f"选择{VENDOR_CN.get(self.device_type, '')}配置模板")
         self.setFixedSize(500, 400)
         self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
         
@@ -111,12 +177,9 @@ class TemplateDialog(QDialog):
         
         self.template_list = QListWidget()
         
-        if self.device_type == "huawei":
-            templates = get_template_names()
-        else:
-            templates = list(H3C_TEMPLATES.keys())
-        
-        for name in templates:
+        # 五厂商统一取模板集
+        self._templates = get_vendor_templates(self.device_type)
+        for name in self._templates.keys():
             self.template_list.addItem(name)
         
         self.template_list.setStyleSheet("font-size: 13px;")
@@ -134,17 +197,9 @@ class TemplateDialog(QDialog):
         layout.addWidget(buttons)
     
     def on_selection_changed(self, row):
-        if self.device_type == "huawei":
-            from utils.templates import get_template_description
-            template_names = get_template_names()
-            if 0 <= row < len(template_names):
-                desc = get_template_description(template_names[row])
-                self.desc_label.setText(desc)
-        else:
-            template_names = list(H3C_TEMPLATES.keys())
-            if 0 <= row < len(template_names):
-                desc = H3C_TEMPLATES[template_names[row]]["description"]
-                self.desc_label.setText(desc)
+        names = list(self._templates.keys())
+        if 0 <= row < len(names):
+            self.desc_label.setText(self._templates[names[row]].get("description", ""))
 
 
 class MainWindow(QMainWindow):
@@ -196,8 +251,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
 
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(22, 18, 22, 18)
+        main_layout.setSpacing(14)
         
         content_splitter = QSplitter(Qt.Horizontal)
         content_splitter.setHandleWidth(3)
@@ -223,35 +278,8 @@ class MainWindow(QMainWindow):
             "接口配置": self.tabs["interface"],
         })
 
-        def scroll_wrap(widget):
-            """tab 内容包滚动区：视口装不下时出滚动条（横向纵向皆可滚动），
-            绝不允许压缩表单卡片（防文字叠印/横向截断）"""
-            from PyQt5.QtWidgets import QScrollArea, QFrame, QGroupBox, QLineEdit, QSpinBox, QComboBox
-            # 1) 输入控件设最小宽：保证占位提示/输入内容读得清（150px ≈ 12 汉字占位）
-            for editor in widget.findChildren(QLineEdit):
-                editor.setMinimumWidth(150)
-            for sp in widget.findChildren(QSpinBox):
-                sp.setMinimumWidth(110)
-            for cb in widget.findChildren(QComboBox):
-                cb.setMinimumWidth(130)
-            # 2) 双栏页的左右面板设最小宽：每栏表单不被压扁
-            for panel in widget.findChildren(QWidget):
-                lay = panel.layout()
-                if lay is None:
-                    continue
-                if lay.count() and any(lay.itemAt(i) and isinstance(lay.itemAt(i).widget(), QGroupBox)
-                                        for i in range(lay.count())):
-                    panel.setMinimumWidth(300)
-            area = QScrollArea()
-            area.setWidget(widget)
-            area.setWidgetResizable(True)
-            area.setFrameShape(QFrame.NoFrame)
-            area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-            return area
-
-        self.tab_widget.addTab(scroll_wrap(self.config_gen_page), "配置生成")
+        # 配置生成页自带子页滚动区，不再重复外包（防宽度需求叠算出横向溢出）
+        self.tab_widget.addTab(self.config_gen_page, "配置生成")
         self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
         self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
         self.tab_widget.addTab(self.tabs["console_viz"], "Console 可视化")
@@ -673,13 +701,11 @@ class MainWindow(QMainWindow):
         
         template_menu.addSeparator()
         
-        apply_huawei_action = QAction("应用华为模板", self)
-        apply_huawei_action.triggered.connect(lambda: self.quick_apply_template("huawei"))
-        template_menu.addAction(apply_huawei_action)
-        
-        apply_h3c_action = QAction("应用H3C模板", self)
-        apply_h3c_action.triggered.connect(lambda: self.quick_apply_template("h3c"))
-        template_menu.addAction(apply_h3c_action)
+        # 五厂商模板（二开补齐：华为/H3C/锐捷/迈普/思科）
+        for _vendor in ("huawei", "h3c", "ruijie", "maipu", "cisco"):
+            act = QAction(f"应用{VENDOR_CN[_vendor]}模板", self)
+            act.triggered.connect(lambda checked=False, v=_vendor: self.quick_apply_template(v))
+            template_menu.addAction(act)
         
         template_menu.addSeparator()
         
