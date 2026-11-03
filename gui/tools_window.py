@@ -4,7 +4,8 @@
 网络工具箱主窗口（二开：与主窗口一致的现代化无边框样式）
 """
 
-from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+                             QStackedWidget, QScrollArea, QFrame, QPushButton,
                              QTabWidget, QLabel, QMessageBox, QStatusBar)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPainter, QColor, QCursor
@@ -79,25 +80,122 @@ class NetworkToolsWindow(QMainWindow):
         header.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(header)
 
-        tabs = QTabWidget()
-        tabs.setTabPosition(QTabWidget.North)
+        # ===== 两级结构：首页功能卡片网格 → 点击进入具体工具 =====
+        self.stack = QStackedWidget()
+        self._tool_pages = []
 
-        tabs.addTab(SubnetCalculatorWidget(), "🧮 子网计算器")
-        tabs.addTab(PingTestWidget(), "🔔 Ping 测试")
-        tabs.addTab(PortScanWidget(), "🔍 端口扫描")
-        tabs.addTab(TraceRouteWidget(), "🛤️ 路由跟踪")
-        tabs.addTab(DNSToolWidget(), "🌐 DNS/Whois")
-        tabs.addTab(HTTPStatusWidget(), "🌐 HTTP检测")
-        tabs.addTab(MACToolWidget(), "📀 MAC查询")
-        tabs.addTab(PasswordGeneratorWidget(), "🔐 密码生成")
-        tabs.addTab(EncoderToolWidget(), "🔄 编码转换")
-        tabs.addTab(NetworkInfoWidget(), "🖥️ 网络信息")
-        tabs.addTab(IPConverterWidget(), "🔄 IP 转换")
+        # 一级：功能卡片首页
+        TOOLS = [
+            ("🧮", "子网计算器", "IP 子网划分、掩码换算、CIDR 计算", SubnetCalculatorWidget),
+            ("🔔", "Ping 测试", "连通性检测、批量 Ping、Ping 扫描", PingTestWidget),
+            ("🔍", "端口扫描", "TCP 端口开放检测、常见端口速查", PortScanWidget),
+            ("🛤️", "路由跟踪", "Traceroute 路径追踪与逐跳延迟", TraceRouteWidget),
+            ("🌐", "DNS / Whois", "域名解析、反向 DNS、备案信息", DNSToolWidget),
+            ("🌐", "HTTP 检测", "网站状态码、响应头检测", HTTPStatusWidget),
+            ("📀", "MAC 查询", "MAC 地址厂商归属查询", MACToolWidget),
+            ("🔐", "密码生成", "强密码随机生成与强度评估", PasswordGeneratorWidget),
+            ("🔄", "编码转换", "Base64 / URL / Hex 编解码", EncoderToolWidget),
+            ("🖥️", "网络信息", "本机 IP、公网 IP、网卡信息", NetworkInfoWidget),
+            ("🔄", "IP 转换", "十进制 / 十六进制 / 二进制互转", IPConverterWidget),
+        ]
 
-        main_layout.addWidget(tabs, 1)
+        home = QWidget()
+        home_lay = QVBoxLayout(home)
+        home_lay.setContentsMargins(0, 0, 0, 0)
+        home_lay.setSpacing(12)
 
-        self.statusBar().showMessage("就绪")
+        hint = QLabel("选择一个工具开始使用")
+        hint.setStyleSheet("color: #7A8699; font-size: 13px; padding-left: 2px;")
+        home_lay.addWidget(hint)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(12)
+
+        # 先把首页放进 stack（index 0），工具页依次 1..N
+        self.stack.addWidget(home)
+
+        for idx, (icon, name, desc, widget_cls) in enumerate(TOOLS):
+            card = self._make_tool_card(icon, name, desc, idx)
+            grid.addWidget(card, idx // 3, idx % 3)
+            # 工具页（带返回条）
+            page = QWidget()
+            p_lay = QVBoxLayout(page)
+            p_lay.setContentsMargins(0, 0, 0, 0)
+            p_lay.setSpacing(8)
+
+            bar = QHBoxLayout()
+            back_btn = QPushButton("← 返回工具箱")
+            back_btn.setObjectName("ghostButton")
+            back_btn.setCursor(Qt.PointingHandCursor)
+            back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+            bar.addWidget(back_btn)
+            title = QLabel(f"{icon}  {name}")
+            title.setStyleSheet("font-size: 17px; font-weight: bold; color: #1F2A37;")
+            bar.addWidget(title)
+            bar.addStretch()
+            p_lay.addLayout(bar)
+
+            p_lay.addWidget(widget_cls(), 1)
+            self.stack.addWidget(page)
+            self._tool_pages.append(page)
+
+        # 网格最后一列自适应
+        for c in range(3):
+            grid.setColumnStretch(c, 1)
+        scroll.setWidget(grid_host)
+        home_lay.addWidget(scroll, 1)
+
+        self.stack.setCurrentIndex(0)   # 首页（index 0 已在循环前加入）
+        main_layout.addWidget(self.stack, 1)
+
+        self.statusBar().showMessage("就绪 · 点击功能卡片进入工具")
         self.statusBar().setStyleSheet("color: #7A8699; font-size: 12px;")
+
+    def _make_tool_card(self, icon, name, desc, index):
+        """功能卡片：图标 + 名称 + 简介，整卡可点"""
+        card = QPushButton()
+        card.setCursor(Qt.PointingHandCursor)
+        card.setMinimumHeight(96)
+        card.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF; border: 1px solid #E5EAF2;
+                border-radius: 14px; text-align: left; padding: 14px 16px;
+            }
+            QPushButton:hover { border: 1px solid #0089FF; background: #F5FAFF; }
+            QPushButton:pressed { background: #EAF4FF; }
+        """)
+        lay = QHBoxLayout(card)
+        lay.setContentsMargins(14, 10, 12, 10)
+        lay.setSpacing(12)
+        ic = QLabel(icon)
+        ic.setStyleSheet("font-size: 26px; background: transparent;")
+        ic.setFixedWidth(40)
+        lay.addWidget(ic)
+        col = QVBoxLayout()
+        col.setSpacing(2)
+        n = QLabel(name)
+        n.setStyleSheet("font-size: 14px; font-weight: bold; color: #1F2A37; background: transparent;")
+        d = QLabel(desc)
+        d.setStyleSheet("font-size: 12px; color: #7A8699; background: transparent;")
+        d.setWordWrap(True)
+        col.addWidget(n)
+        col.addWidget(d)
+        lay.addLayout(col, 1)
+        arrow = QLabel("›")
+        arrow.setStyleSheet("font-size: 20px; color: #B7C3D4; background: transparent;")
+        lay.addWidget(arrow)
+        # 点击气泡内的子控件不会吞事件（QLabel 默认透明）
+        for w in (ic, n, d, arrow):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        card.clicked.connect(lambda: self.stack.setCurrentIndex(index + 1))
+        return card
 
     # ---------------- 无边框窗口支持 ----------------
     def paintEvent(self, event):
