@@ -12,6 +12,48 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
 
+
+def _enable_legacy_ssh_algorithms():
+    """兼容老设备（H3C/华为旧固件）的 SSH 算法
+    实测：H3C Comware V7 (2020) 只提供 ssh-rsa 主机密钥 + SHA1 KEX，
+    而 paramiko 4+/5+ 默认已剔除这些算法，直接连会报
+    'Incompatible ssh peer (no acceptable host key)'。
+    网工环境老设备是常态，这里把传统算法追加到协商列表末尾（不影响新设备优先用强算法）。
+    """
+    try:
+        import paramiko
+        T = paramiko.Transport
+        def _append(attr, extra):
+            cur = list(getattr(T, attr))
+            for item in extra:
+                if item not in cur:
+                    cur.append(item)
+            setattr(T, attr, tuple(cur))
+        _append("_preferred_keys", ("ssh-rsa", "ssh-dss"))
+        _append("_preferred_kex", (
+            "diffie-hellman-group14-sha1",
+            "diffie-hellman-group1-sha1",
+            "diffie-hellman-group-exchange-sha1",
+            "diffie-hellman-group14-sha256",
+            "diffie-hellman-group16-sha512",
+        ))
+        _append("_preferred_ciphers", ("aes128-cbc", "aes256-cbc", "3des-cbc"))
+        _append("_preferred_macs", ("hmac-sha1", "hmac-md5", "hmac-sha1-96"))
+        # paramiko 5.x 连 ssh-rsa 的密钥类映射也删了，补回（否则验证时 KeyError: 'ssh-rsa'）
+        try:
+            from paramiko.rsakey import RSAKey
+            info = dict(paramiko.Transport._key_info)
+            info["ssh-rsa"] = RSAKey          # 老设备仅提供 ssh-rsa 主机密钥
+            paramiko.Transport._key_info = info
+        except Exception:
+            pass
+        # 实例级兜底：部分版本 _key_info 是实例属性，连接时再补（见 _patch_transport）
+    except Exception:
+        pass  # 兼容层失败不影响正常连接
+
+
+_enable_legacy_ssh_algorithms()
+
 # 厂商 -> netmiko device_type（官方 platform 映射，勿自造）
 VENDOR_NETMIKO_TYPE = {
     "huawei": "huawei",
