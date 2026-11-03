@@ -247,13 +247,23 @@ class MainWindow(QMainWindow):
             "interface": InterfaceConfigTab(),
             "device_ops": DeviceOpsTab()
         }
-        
-        self.tab_widget.addTab(self.tabs["basic"], "基础配置")
-        self.tab_widget.addTab(self.tabs["vlan"], "VLAN配置")
-        self.tab_widget.addTab(self.tabs["routing"], "路由配置")
-        self.tab_widget.addTab(self.tabs["security"], "安全配置")
-        self.tab_widget.addTab(self.tabs["interface"], "接口配置")
-        self.tab_widget.addTab(self.tabs["device_ops"], "设备运维")
+
+        def scroll_wrap(widget):
+            """tab 内容包滚动区：窗口装不下时出滚动条，绝不允许垂直压缩表单卡片（防文字叠印）"""
+            from PyQt5.QtWidgets import QScrollArea, QFrame
+            area = QScrollArea()
+            area.setWidget(widget)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.NoFrame)
+            area.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+            return area
+
+        self.tab_widget.addTab(scroll_wrap(self.tabs["basic"]), "基础配置")
+        self.tab_widget.addTab(scroll_wrap(self.tabs["vlan"]), "VLAN配置")
+        self.tab_widget.addTab(scroll_wrap(self.tabs["routing"]), "路由配置")
+        self.tab_widget.addTab(scroll_wrap(self.tabs["security"]), "安全配置")
+        self.tab_widget.addTab(scroll_wrap(self.tabs["interface"]), "接口配置")
+        self.tab_widget.addTab(scroll_wrap(self.tabs["device_ops"]), "设备运维")
         
         left_layout.addWidget(self.tab_widget)
         
@@ -362,11 +372,26 @@ class MainWindow(QMainWindow):
 
     def _apply_form_layout_polish(self):
         """统一打磨全窗口表单与卡片（一处代码覆盖所有 tab）：
-        - 标签右对齐 + 统一最小宽 → 所有分组的输入框起点跨布局对齐
+        - 标签右对齐 + 按字体实际宽度自适应列宽 → 所有分组的输入框起点跨布局对齐
         - QGroupBox 轻阴影 → 卡片层次感
         """
-        from PyQt5.QtWidgets import QFormLayout, QGroupBox
+        from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel
         from PyQt5.QtWidgets import QGraphicsDropShadowEffect
+        from PyQt5.QtGui import QFontMetrics
+
+        # 1) 收集全窗口所有表单标签，计算统一标签列宽（最长标签宽 + 余量）
+        label_width = 0
+        for form in self.findChildren(QFormLayout):
+            for row in range(form.rowCount()):
+                item = form.itemAt(row, QFormLayout.LabelRole)
+                if item is not None and isinstance(item.widget(), QLabel):
+                    fm = QFontMetrics(item.widget().font())
+                    text = item.widget().text()
+                    if text:
+                        label_width = max(label_width, fm.horizontalAdvance(text))
+        label_width = max(label_width, 64) + 16  # 至少 64px，加 16px 呼吸空间
+
+        # 2) 应用到所有表单：右对齐 + 统一列宽 + 间距
         for form in self.findChildren(QFormLayout):
             form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
             form.setFormAlignment(Qt.AlignTop | Qt.AlignHCenter)
@@ -374,8 +399,10 @@ class MainWindow(QMainWindow):
             form.setVerticalSpacing(13)
             for row in range(form.rowCount()):
                 item = form.itemAt(row, QFormLayout.LabelRole)
-                if item is not None and item.widget() is not None:
-                    item.widget().setMinimumWidth(88)
+                if item is not None and isinstance(item.widget(), QLabel):
+                    item.widget().setFixedWidth(label_width)
+
+        # 3) 卡片轻阴影
         for group in self.findChildren(QGroupBox):
             shadow = QGraphicsDropShadowEffect(self)
             shadow.setBlurRadius(22)

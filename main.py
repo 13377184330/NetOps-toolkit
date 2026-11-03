@@ -11,8 +11,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QPalette, QColor, QPalette, QColor
+from PyQt5.QtCore import Qt, QT_VERSION_STR
+from PyQt5.QtGui import QFont, QPalette, QColor
+
+# 高分屏适配：让系统 DPI 缩放接管，避免 Qt 内部两次换算导致文字发糊/挤压（150% DPI 环境实测）
+if hasattr(Qt, "AA_EnableHighDpiScaling"):
+    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+if hasattr(Qt, "AA_UseHighDpiPixmaps"):
+    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
 
 from gui.main_window import MainWindow
 from gui.tools_window import NetworkToolsWindow
