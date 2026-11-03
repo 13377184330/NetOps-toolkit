@@ -23,6 +23,8 @@ from gui.tools.http_tool import HTTPStatusWidget
 from gui.tools.password_tool import PasswordGeneratorWidget
 from gui.tools.encoder_tool import EncoderToolWidget
 from gui.tools.mac_tool import MACToolWidget
+from gui.tools.nl_gen_tool import NLGenWidget
+from gui.tools.troubleshoot_tool import TroubleshootWidget
 from gui.styles import MODERN_STYLE, BG
 from gui.title_bar import FramelessTitleBar
 
@@ -71,6 +73,8 @@ class NetworkToolsWindow(QMainWindow):
 
         # 一级：功能卡片首页
         TOOLS = [
+            ("✨", "自然语言生成", "大白话 → 五厂商配置命令（离线）", NLGenWidget),
+            ("🛠️", "排错·重置命令", "只读排错 / 保存 / 重置 / 密码恢复速查", TroubleshootWidget),
             ("🧮", "子网计算器", "IP 子网划分、掩码换算、CIDR 计算", SubnetCalculatorWidget),
             ("🔔", "Ping 测试", "连通性检测、批量 Ping、Ping 扫描", PingTestWidget),
             ("🔍", "端口扫描", "TCP 端口开放检测、常见端口速查", PortScanWidget),

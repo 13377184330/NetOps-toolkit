@@ -25,6 +25,7 @@ from gui.tabs.device_ops_tab import DeviceOpsTab
 from gui.tabs.console_viz_tab import ConsoleVizTab
 from gui.tabs.topology_tab import NetworkTopologyPage
 from gui.config_gen_page import ConfigGenPage
+from modules import cmd_notes
 from utils.templates import get_template_names, get_template_config
 from utils.validator import ConfigValidator
 
@@ -294,6 +295,8 @@ class MainWindow(QMainWindow):
         self.tab_widget._nav.setStyleSheet(NAV_QSS)
         self.tab_widget.select_first()  # 默认选中第一页（导航高亮）
         
+        self._clean_config = ""  # 最近一次生成的纯命令（注释另加，见 cmd_notes）
+        
         # 主内容：左侧导航+页面（widget），右侧预览区
         nav_widget = QWidget()
         nav_layout = QVBoxLayout(nav_widget)
@@ -309,9 +312,20 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout(button_widget)
         button_layout.setContentsMargins(0, 0, 0, 0)
         self._config_tools_widget = button_widget
-        
+
         template_btn = None  # 「配置模板」按钮已移除：与顶部「模板(M)」菜单重复
-        
+
+        # 命令释义开关（对标 NetCMD）：并肩显示每条命令的中文说明，降低门槛；
+        # 注释仅用于阅读，复制/导出/下发永远走纯命令
+        self.comment_btn = QPushButton("💡 命令释义")
+        self.comment_btn.setObjectName("ghostButton")
+        self.comment_btn.setCheckable(True)
+        self.comment_btn.setChecked(True)
+        self.comment_btn.setToolTip("开启后，右侧预览每条命令后显示中文说明（仅阅读用，复制时不包含）")
+        self.comment_btn.setCursor(QCursor(Qt.PointingHandCursor))
+        self.comment_btn.toggled.connect(self._toggle_comments)
+        button_layout.addWidget(self.comment_btn)
+
         validate_btn = QPushButton("验证配置")
         validate_btn.setObjectName("ghostButton")
         validate_btn.setToolTip("验证当前配置参数")
@@ -466,6 +480,24 @@ class MainWindow(QMainWindow):
         # 配置操作按钮行
         if hasattr(self, "_config_tools_widget"):
             self._config_tools_widget.setVisible(not full_width)
+
+    def _toggle_comments(self, checked: bool):
+        """命令释义开关：切换预览渲染方式"""
+        self.comment_btn.setStyleSheet(
+            "QPushButton:checked { color: #0089FF; border-color: #0089FF; }")
+        self._render_preview()
+
+    def _render_preview(self):
+        """预览区渲染：释义开 → 带中文注释的彩色 HTML；关 → 纯命令"""
+        text = self._clean_config
+        if not text:
+            self.preview_text.clear()
+            return
+        if self.comment_btn.isChecked():
+            self.preview_text.setHtml(cmd_notes.annotate_config(text))
+        else:
+            self.preview_text.setPlainText(text)
+        self.update_info()
 
     def toggle_preview_panel(self):
         """折叠/展开右侧配置预览区"""
@@ -655,6 +687,16 @@ class MainWindow(QMainWindow):
         
         tools_menu.addSeparator()
         
+        nlgen_action = QAction("自然语言生成配置", self)
+        nlgen_action.triggered.connect(lambda: self.open_network_tool("nlgen"))
+        tools_menu.addAction(nlgen_action)
+        
+        trouble_action = QAction("排错·重置命令", self)
+        trouble_action.triggered.connect(lambda: self.open_network_tool("trouble"))
+        tools_menu.addAction(trouble_action)
+        
+        tools_menu.addSeparator()
+        
         password_action = QAction("密码生成器", self)
         password_action.triggered.connect(lambda: self.open_network_tool("password"))
         tools_menu.addAction(password_action)
@@ -746,6 +788,7 @@ class MainWindow(QMainWindow):
         for tab in self.tabs.values():
             tab.clear_config()
         self.preview_text.clear()
+        self._clean_config = ""
         
         self.statusBar().showMessage(f"已切换到{name}模式", 3000)
     
@@ -760,6 +803,8 @@ class MainWindow(QMainWindow):
         from gui.tools.manual_tool import ManualToolWidget
         from gui.tools.config_compare_tool import ConfigCompareWidget
         from gui.tools.config_io_tool import ConfigIOWidget
+        from gui.tools.nl_gen_tool import NLGenWidget
+        from gui.tools.troubleshoot_tool import TroubleshootWidget
         
         tool_widgets = {
             "subnet": SubnetCalculatorWidget,
@@ -769,7 +814,9 @@ class MainWindow(QMainWindow):
             "dns": DNSToolWidget,
             "manual": ManualToolWidget,
             "compare": ConfigCompareWidget,
-            "configio": ConfigIOWidget
+            "configio": ConfigIOWidget,
+            "nlgen": NLGenWidget,
+            "trouble": TroubleshootWidget
         }
         
         if tool_name in tool_widgets:
@@ -783,7 +830,9 @@ class MainWindow(QMainWindow):
                 "dns": "DNS工具",
                 "manual": "配置命令速查手册",
                 "compare": "配置比较工具",
-                "configio": "配置导入导出"
+                "configio": "配置导入导出",
+                "nlgen": "自然语言生成配置",
+                "trouble": "排错·重置命令速查"
             }
             
             dialog.setWindowTitle(f"{titles.get(tool_name, tool_name)}")
@@ -826,11 +875,13 @@ class MainWindow(QMainWindow):
         dialog.exec_()
     
     def update_info(self):
-        text = self.preview_text.toPlainText()
+        text = self._clean_config or self.preview_text.toPlainText()
         line_count = text.count('\n') + 1 if text else 0
         char_count = len(text)
         config_sections = text.count('#')
-        self.info_label.setText(f"行数: {line_count} | 字符: {char_count} | 配置块: {config_sections // 2}")
+        note = " ｜ 释义：开（复制不含注释）" if self.comment_btn.isChecked() else ""
+        self.info_label.setText(
+            f"行数: {line_count} | 字符: {char_count} | 配置块: {config_sections // 2}{note}")
     
     def show_template_dialog(self):
         dialog = TemplateDialog(self.current_device_type, self)
@@ -967,12 +1018,13 @@ class MainWindow(QMainWindow):
         if self.current_device_type == "h3c":
             full_config = full_config.replace("Vlanif", "Vlan-interface")
         
-        self.preview_text.setPlainText(header + full_config)
+        self._clean_config = header + full_config
+        self._render_preview()
         self.statusBar().showMessage("配置生成成功！", 3000)
         QMessageBox.information(self, "成功", "配置生成成功！")
     
     def export_config(self):
-        config_text = self.preview_text.toPlainText()
+        config_text = self._clean_config or self.preview_text.toPlainText()
         if not config_text:
             QMessageBox.warning(self, "警告", "请先生成配置！")
             return
@@ -993,7 +1045,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", f"导出失败：\n{str(e)}")
     
     def copy_to_clipboard(self):
-        config_text = self.preview_text.toPlainText()
+        config_text = self._clean_config or self.preview_text.toPlainText()
         if not config_text:
             QMessageBox.warning(self, "警告", "请先生成配置！")
             return
@@ -1002,8 +1054,9 @@ class MainWindow(QMainWindow):
         clipboard = QApplication.clipboard()
         clipboard.setText(config_text)
         
-        self.statusBar().showMessage("配置已复制到剪贴板", 3000)
-        QMessageBox.information(self, "成功", "配置已复制到剪贴板！")
+        msg = "配置已复制到剪贴板（纯命令，注释不包含，可直接粘贴设备）"
+        self.statusBar().showMessage(msg, 4000)
+        QMessageBox.information(self, "成功", msg + "！")
     
     def clear_config(self):
         reply = QMessageBox.question(
@@ -1015,6 +1068,7 @@ class MainWindow(QMainWindow):
             for tab in self.tabs.values():
                 tab.clear_config()
             self.preview_text.clear()
+            self._clean_config = ""
             self.statusBar().showMessage("配置已清空", 3000)
     
     def open_template_manager(self):
