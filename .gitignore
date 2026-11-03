@@ -30,3 +30,6 @@ dist/
 # 系统杂项
 Thumbs.db
 .DS_Store
+
+# 临时启动脚本
+_open_tools_new.py
