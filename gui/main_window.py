@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         if screen is not None:
             avail = screen.availableGeometry()
             target_w = min(int(avail.width() * 0.85), 1500)
-            target_h = min(int(avail.height() * 0.85), 950)
+            target_h = min(int(avail.height() * 0.82), 880)  # 高度多收一档，给状态栏/任务栏留呼吸
             self.resize(target_w, target_h)
         else:
             self.resize(1280, 800)
@@ -245,7 +245,9 @@ class MainWindow(QMainWindow):
         
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.North)
-        self.tab_widget.setDocumentMode(True)
+        # 标准（非 document）模式：tab 栏带安全内边距，tab 过多时出滚动箭头而不是裁切首 tab
+        self.tab_widget.setUsesScrollButtons(True)
+        self.tab_widget.setElideMode(Qt.ElideNone)
         
         self.tabs = {
             "basic": BasicConfigTab(),
