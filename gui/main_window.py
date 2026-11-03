@@ -269,13 +269,13 @@ class MainWindow(QMainWindow):
             "console_viz": ConsoleVizTab(),
             "topology": NetworkTopologyPage()
         }
-        # 配置生成聚合页（5 个配置模块收进二级导航）
+        # 配置生成聚合页（5 个配置模块收进二级导航，按使用频率排序：高频在前）
         self.config_gen_page = ConfigGenPage({
             "基础配置": self.tabs["basic"],
+            "接口配置": self.tabs["interface"],
             "VLAN配置": self.tabs["vlan"],
             "路由配置": self.tabs["routing"],
             "安全配置": self.tabs["security"],
-            "接口配置": self.tabs["interface"],
         })
 
         # 配置生成页自带子页滚动区，不再重复外包（防宽度需求叠算出横向溢出）

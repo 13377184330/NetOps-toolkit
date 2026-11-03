@@ -151,22 +151,25 @@ VENDOR_LLDP_CMD = {
 }
 
 
-def _send(ser, command: str):
-    """发送前的只读校验（红线执行点：所有命令出口都过这里）"""
-    ok, reason = check_read_only(command)
-    if not ok:
-        raise PermissionError(reason)
+def _send(ser, command: str, allow_write: bool = False):
+    """命令发送出口。allow_write=False 时强校验只读（安全默认）；
+    显式允许写入（配置下发场景，需用户在 UI 确认）时放行配置/撤销类命令"""
+    if not allow_write:
+        ok, reason = check_read_only(command)
+        if not ok:
+            raise PermissionError(reason)
     ser.write(command.encode("utf-8") + b"\r\n")
 
 
 class ConsoleReader:
-    """Console 只读会话：打开发回车 → 识别厂商 → 抓配置（全部只读）"""
+    """Console 会话：识别厂商 / 抓配置（只读） / 下发配置（需 allow_write=True 显式开启）"""
 
-    def __init__(self, port: str, baud: int = 9600):
+    def __init__(self, port: str, baud: int = 9600, allow_write: bool = False):
         self.port = port
         self.baud = baud
         self.ser = None
         self.vendor = None
+        self.allow_write = allow_write
 
     def __enter__(self):
         self.open()
@@ -238,43 +241,70 @@ class ConsoleReader:
         cmd = VENDOR_LLDP_CMD.get(self.vendor, "display lldp neighbor-information verbose")
         return self._exec(cmd, max_wait=25)
 
+    # ---------------- 配置下发（需显式 allow_write） ----------------
+    def send_config(self, config_lines, apply_mode=True, save=False):
+        """把配置命令逐条下发到设备（需 allow_write=True 才可调用）
+        apply_mode: 是否自动进入 system-view
+        save: 是否存盘（默认不存盘，只改 running-config，可撤回）
+        返回每步回显列表
+        """
+        if not self.allow_write:
+            raise PermissionError("未开启写模式（ConsoleReader(allow_write=True)）")
+        results = []
+        cmds = [c.strip() for c in config_lines if c.strip() and not c.strip().startswith("#")]
+        if apply_mode:
+            results.append(("system-view", self._exec("system-view", max_wait=10)))
+            # 二次确认进入系统视图（部分设备提示 [Y/N]）
+            tail = results[-1][1][-80:].lower()
+            if "[y/n]" in tail or "yes/no" in tail:
+                self.ser.write(b"y\r\n")
+                time.sleep(0.8)
+                results[-1] = ("system-view", results[-1][1] + self._clean(
+                    read_until_idle(self.ser, max_wait=8).decode("utf-8", errors="replace"), "y"))
+        for cmd in cmds:
+            results.append((cmd, self._exec(cmd, max_wait=12)))
+        if apply_mode:
+            results.append(("return", self._exec("return", max_wait=8)))
+        if save:
+            save_out = self._exec("save", max_wait=10)
+            if "[y/n]" in save_out.lower() or "yes/no" in save_out.lower():
+                self.ser.write(b"y\r\n")
+                time.sleep(2.0)
+                save_out += self._clean(read_until_idle(self.ser, max_wait=15).decode("utf-8", errors="replace"), "y")
+            results.append(("save", save_out))
+        return results
+
     @staticmethod
     def _clean(text: str, cmd: str) -> str:
-        """去掉命令回显行（含提示符前缀）、---- More ---- 残留、尾部提示符行"""
+        """清洗串口输出：去命令回显、More 残留、行尾空格、纯空白行、尾部提示符
+        （More 翻页会留下覆盖残行，表现为行内大量空格；统一 rstrip + 过滤空行）"""
         out_lines = []
         cmd_l = cmd.lower()
         for ln in text.splitlines():
             s = ln.strip()
-            if not s:
-                out_lines.append(ln)
-                continue
-            # More 翻页：保留覆盖行后的有效内容
+            # More 翻页：取覆盖行之后的有效内容
             if "---- More ----" in s:
-                tail = ln.split("---- More ----")[-1]
-                if tail.strip():
-                    out_lines.append(tail)
-                continue
-            # 命令回显行：纯命令 或 <prompt>命令 形态
-            core = re.sub(r"^<?\[?[\w.\-/@:]+\]?>?\s*", "", s) if False else None
-            # 判定：行等于命令 / 行以提示符开头且剩余部分等于命令
-            if s.lower() == cmd_l:
+                s = ln.split("---- More ----")[-1].strip()
+                if not s:
+                    continue
+            if not s:
+                continue   # 纯空白行直接丢弃（More 残行归一）
+            # 命令回显行（纯命令 / <prompt>命令）
+            if s.lower() == cmd_l or s.lower().startswith(cmd_l):
                 continue
             m = re.match(r"^<[A-Za-z][\w.\-]*> ?(.*)$", s)
             if m and m.group(1).strip().lower() == cmd_l:
                 continue
-            if s.lower().startswith(cmd_l):
-                continue
-            # 提示符孤立行（<H3a> / [H3a] 等）：保留（尾部结尾的去掉）
+            # 孤立提示符行
             if re.match(r"^<[A-Za-z][\w.\-]*>$", s) or re.match(r"^\[[A-Za-z][\w.\-]*\]$", s):
                 continue
-            out_lines.append(ln)
-        # 去掉尾部残余的提示符行与空白
-        body = "\n".join(out_lines).strip()
-        # 尾部孤立提示符
-        lines = body.splitlines()
-        while lines and (not lines[-1].strip() or re.match(r"^<[A-Za-z][\w.\-]*>$", lines[-1].strip())
-                         or re.match(r"^\[[A-Za-z][\w.\-]*\]$", lines[-1].strip())):
-            lines.pop()
-        return "\n".join(lines).strip()
+            # 行尾空格统一去掉（保留行首缩进，配置层级靠缩进）
+            out_lines.append(ln.rstrip())
+        # 去掉尾部残余提示符/空白
+        while out_lines and (not out_lines[-1].strip()
+                             or re.match(r"^<[A-Za-z][\w.\-]*>$", out_lines[-1].strip())
+                             or re.match(r"^\[[A-Za-z][\w.\-]*\]$", out_lines[-1].strip())):
+            out_lines.pop()
+        return "\n".join(out_lines).strip()
 
 import re  # noqa: E402  （_clean 用到）

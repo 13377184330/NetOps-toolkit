@@ -76,6 +76,34 @@ class _ConsoleWorker(QThread):
 
 
 # ---------------------------------------------------------------- 主面板
+class _DeployWorker(QThread):
+    """配置下发后台线程（Console 写模式）"""
+    log = pyqtSignal(str)
+    done = pyqtSignal(bool, str)
+
+    def __init__(self, port, baud, lines, parent=None):
+        super().__init__(parent)
+        self.port = port
+        self.baud = baud
+        self.lines = lines
+
+    def run(self):
+        try:
+            with cr.ConsoleReader(self.port, self.baud, allow_write=True) as reader:
+                reader.detect()
+                self.log.emit(f"[下发] 已连接 {self.port}，开始下发 {len(self.lines)} 条命令…")
+                steps = reader.send_config(self.lines, save=False)
+                errs = [c for c, out in steps if any(k in out for k in ("% Unrecognized", "% Wrong", "Error:", "Incomplete"))]
+                if errs:
+                    self.log.emit(f"[下发] 注意：{len(errs)} 条命令可能有语法问题：{errs[:3]}")
+                self.done.emit(True, f"已下发 {len(self.lines)} 条命令（未存盘）。"
+                                     f"\n有问题的命令：{len(errs)} 条" + (f"\n{errs[:3]}" if errs else ""))
+        except PermissionError as e:
+            self.done.emit(False, str(e))
+        except Exception as e:
+            self.done.emit(False, f"{type(e).__name__}: {e}")
+
+
 class ConsoleVizTab(QWidget):
     """Console 只读可视化面板"""
 
@@ -185,23 +213,36 @@ class ConsoleVizTab(QWidget):
         log_lay.addWidget(self.log_view)
         layout.addWidget(log_group)
 
-        # 配置原文（最大区域：文本内容要看得全）
-        raw_group = QGroupBox("配置原文（running-configuration）")
+        # 配置原文（可编辑 + 下发闭环：读到的东西能改、能回写）
+        raw_group = QGroupBox("配置原文（可编辑 → 下发到设备）")
         raw_group.setMinimumHeight(240)
         raw_lay = QVBoxLayout(raw_group)
         raw_lay.setContentsMargins(12, 24, 12, 12)
         raw_lay.setSpacing(8)
         self.raw_view = QTextEdit()
-        self.raw_view.setReadOnly(True)
-        self.raw_view.setPlaceholderText("配置原文显示在这里（全宽展示，看得全）")
+        self.raw_view.setReadOnly(False)   # 可编辑：改完可直接下发
+        self.raw_view.setPlaceholderText(
+            "配置原文显示在这里（可直接编辑）——改完点下方「下发到设备」写回交换机")
         raw_lay.addWidget(self.raw_view, 1)
 
         raw_btn_row = QHBoxLayout()
-        save_btn = QPushButton("💾 保存配置文件（.cfg）")
-        save_btn.setObjectName("secondaryButton")
-        save_btn.clicked.connect(self.save_config)
+        raw_btn_row.setSpacing(8)
+        self.save_btn = QPushButton("💾 保存配置文件（.cfg）")
+        self.save_btn.setObjectName("secondaryButton")
+        self.save_btn.clicked.connect(self.save_config)
+        self.deploy_btn_c = QPushButton("⤴ 下发到设备")
+        self.deploy_btn_c.setObjectName("primaryButton")
+        self.deploy_btn_c.setToolTip("把上方编辑后的配置命令下发到当前 Console 连接的交换机（会先弹确认）")
+        self.deploy_btn_c.clicked.connect(self.deploy_to_device)
+        self.reset_btn = QPushButton("↺ 还原原文")
+        self.reset_btn.setObjectName("ghostButton")
+        self.reset_btn.setToolTip("丢弃编辑，恢复为最近一次采集到的原文")
+        self.reset_btn.clicked.connect(
+            lambda: self.raw_view.setPlainText(self._raw_config))
+        raw_btn_row.addWidget(self.reset_btn)
         raw_btn_row.addStretch()
-        raw_btn_row.addWidget(save_btn)
+        raw_btn_row.addWidget(self.save_btn)
+        raw_btn_row.addWidget(self.deploy_btn_c)
         raw_lay.addLayout(raw_btn_row)
         layout.addWidget(raw_group, 5)
 
@@ -388,3 +429,54 @@ class ConsoleVizTab(QWidget):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._raw_config)
             QMessageBox.information(self, "成功", f"配置已保存到：\n{path}")
+
+    # ---------------- 配置下发（闭环） ----------------
+    def deploy_to_device(self):
+        """把编辑后的配置下发回当前 Console 交换机（双重确认 + 自动备份原文）"""
+        port = self.port_combo.currentData()
+        if not port:
+            QMessageBox.warning(self, "提示", "未检测到串口，请先连接 Console")
+            return
+        text = self.raw_view.toPlainText().strip()
+        if not text:
+            QMessageBox.warning(self, "提示", "配置内容为空")
+            return
+
+        lines = [l.rstrip() for l in text.splitlines()
+                 if l.strip() and not l.strip().startswith("#")
+                 and not l.strip().startswith("<")]  # 去掉提示符残留行
+        if not lines:
+            QMessageBox.warning(self, "提示", "没有可下发的配置命令行")
+            return
+
+        preview = "\n".join(lines[:8]) + ("\n…" if len(lines) > 8 else "")
+        ret = QMessageBox.question(
+            self, "确认下发配置",
+            f"即将向 Console 交换机（{port}）下发 {len(lines)} 条配置命令：\n\n{preview}\n\n"
+            "下发会立即改变设备运行配置（不自动存盘）。\n"
+            "建议先「保存配置文件」备份当前配置。继续？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+
+        self.deploy_btn_c.setEnabled(False)
+        self.progress.setVisible(True)
+        self.progress_label.setVisible(True)
+        self.progress.setValue(10)
+        self.progress_label.setText("正在下发配置…")
+        self._worker = _DeployWorker(port, self.baud_spin.value(), lines, self)
+        self._worker.log.connect(self.log)
+        self._worker.done.connect(self._on_deploy_done)
+        self._worker.start()
+
+    def _on_deploy_done(self, ok, msg):
+        self.deploy_btn_c.setEnabled(True)
+        self.progress.setVisible(False)
+        self.progress_label.setVisible(False)
+        if ok:
+            QMessageBox.information(self, "下发完成", msg)
+            # 下发后自动重新采集，展示设备最新配置
+            if self.port_combo.currentData():
+                self.start_read()
+        else:
+            QMessageBox.critical(self, "下发失败", msg)
