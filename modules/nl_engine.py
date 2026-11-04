@@ -96,6 +96,9 @@ def norm_port(vendor: str, raw: str) -> str:
         if vendor == "h3c":
             return f"Vlan-interface{vid}"
         return f"Vlan{vid}"
+    bare = re.match(r"^(\d+/\d+/\d+)$", p)   # 裸端口名（1/0/2）→ 补全成 GigabitEthernet
+    if bare:
+        return "GigabitEthernet" + bare.group(1)
     for pat, full in _SHORT_IF:
         m = pat.match(p)
         if m:

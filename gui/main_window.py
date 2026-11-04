@@ -698,6 +698,14 @@ class MainWindow(QMainWindow):
         lint_action.triggered.connect(lambda: self.open_network_tool("lint"))
         tools_menu.addAction(lint_action)
         
+        batch_action = QAction("批量生成（CSV）", self)
+        batch_action.triggered.connect(lambda: self.open_network_tool("batch"))
+        tools_menu.addAction(batch_action)
+        
+        onboard_action = QAction("一键标准化开局", self)
+        onboard_action.triggered.connect(lambda: self.open_network_tool("onboard"))
+        tools_menu.addAction(onboard_action)
+        
         tools_menu.addSeparator()
         
         nlgen_action = QAction("自然语言生成配置", self)
@@ -820,6 +828,8 @@ class MainWindow(QMainWindow):
         from gui.tools.troubleshoot_tool import TroubleshootWidget
         from gui.tools.lint_tool import LintWidget
         from gui.tools.convert_tool import ConvertWidget
+        from gui.tools.batch_tool import BatchWidget
+        from gui.tools.onboard_tool import OnboardWidget
         
         tool_widgets = {
             "subnet": SubnetCalculatorWidget,
@@ -833,7 +843,9 @@ class MainWindow(QMainWindow):
             "nlgen": NLGenWidget,
             "trouble": TroubleshootWidget,
             "lint": LintWidget,
-            "convert": ConvertWidget
+            "convert": ConvertWidget,
+            "batch": BatchWidget,
+            "onboard": OnboardWidget
         }
         
         if tool_name in tool_widgets:
@@ -851,7 +863,9 @@ class MainWindow(QMainWindow):
                 "nlgen": "自然语言生成配置",
                 "trouble": "排错·重置命令速查",
                 "lint": "配置语法纠错",
-                "convert": "跨厂商配置转换"
+                "convert": "跨厂商配置转换",
+                "batch": "批量生成（CSV）",
+                "onboard": "一键标准化开局"
             }
             
             dialog.setWindowTitle(f"{titles.get(tool_name, tool_name)}")

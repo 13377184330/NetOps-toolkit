@@ -27,6 +27,8 @@ from gui.tools.nl_gen_tool import NLGenWidget
 from gui.tools.troubleshoot_tool import TroubleshootWidget
 from gui.tools.lint_tool import LintWidget
 from gui.tools.convert_tool import ConvertWidget
+from gui.tools.batch_tool import BatchWidget
+from gui.tools.onboard_tool import OnboardWidget
 from gui.styles import MODERN_STYLE, BG
 from gui.title_bar import FramelessTitleBar
 
@@ -78,6 +80,8 @@ class NetworkToolsWindow(QMainWindow):
             ("✨", "自然语言生成", "大白话 → 五厂商配置命令（离线）", NLGenWidget),
             ("🔀", "跨厂商配置转换", "华为⇄H3C⇄锐捷/迈普/思科 配置互转", ConvertWidget),
             ("🩺", "配置语法纠错", "粘配置逐行体检：严重/警告/提示", LintWidget),
+            ("📦", "批量生成", "CSV 一次出几十条端口/多台设备配置", BatchWidget),
+            ("🚀", "一键标准化开局", "新交换机上线：命名/管理/账号/时间/日志一步到位", OnboardWidget),
             ("🛠️", "排错·重置命令", "只读排错 / 保存 / 重置 / 密码恢复速查", TroubleshootWidget),
             ("🧮", "子网计算器", "IP 子网划分、掩码换算、CIDR 计算", SubnetCalculatorWidget),
             ("🔔", "Ping 测试", "连通性检测、批量 Ping、Ping 扫描", PingTestWidget),
