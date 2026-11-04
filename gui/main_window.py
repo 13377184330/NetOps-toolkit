@@ -24,6 +24,7 @@ from gui.tabs.interface_tab import InterfaceConfigTab
 from gui.tabs.device_ops_tab import DeviceOpsTab
 from gui.tabs.console_viz_tab import ConsoleVizTab
 from gui.tabs.topology_tab import NetworkTopologyPage
+from gui.tabs.adv_config_tab import AdvConfigTab
 from gui.config_gen_page import ConfigGenPage
 from modules import cmd_notes
 from utils.templates import get_template_names, get_template_config
@@ -266,17 +267,19 @@ class MainWindow(QMainWindow):
             "routing": RoutingConfigTab(),
             "security": SecurityConfigTab(),
             "interface": InterfaceConfigTab(),
+            "adv": AdvConfigTab(),
             "device_ops": DeviceOpsTab(),
             "console_viz": ConsoleVizTab(),
             "topology": NetworkTopologyPage()
         }
-        # 配置生成聚合页（5 个配置模块收进二级导航，按使用频率排序：高频在前）
+        # 配置生成聚合页（配置模块收进二级导航，按使用频率排序：高频在前）
         self.config_gen_page = ConfigGenPage({
             "基础配置": self.tabs["basic"],
             "接口配置": self.tabs["interface"],
             "VLAN配置": self.tabs["vlan"],
             "路由配置": self.tabs["routing"],
             "安全配置": self.tabs["security"],
+            "高级配置": self.tabs["adv"],
         })
 
         # 配置生成页自带子页滚动区，不再重复外包（防宽度需求叠算出横向溢出）
@@ -687,6 +690,16 @@ class MainWindow(QMainWindow):
         
         tools_menu.addSeparator()
         
+        convert_action = QAction("跨厂商配置转换", self)
+        convert_action.triggered.connect(lambda: self.open_network_tool("convert"))
+        tools_menu.addAction(convert_action)
+        
+        lint_action = QAction("配置语法纠错", self)
+        lint_action.triggered.connect(lambda: self.open_network_tool("lint"))
+        tools_menu.addAction(lint_action)
+        
+        tools_menu.addSeparator()
+        
         nlgen_action = QAction("自然语言生成配置", self)
         nlgen_action.triggered.connect(lambda: self.open_network_tool("nlgen"))
         tools_menu.addAction(nlgen_action)
@@ -805,6 +818,8 @@ class MainWindow(QMainWindow):
         from gui.tools.config_io_tool import ConfigIOWidget
         from gui.tools.nl_gen_tool import NLGenWidget
         from gui.tools.troubleshoot_tool import TroubleshootWidget
+        from gui.tools.lint_tool import LintWidget
+        from gui.tools.convert_tool import ConvertWidget
         
         tool_widgets = {
             "subnet": SubnetCalculatorWidget,
@@ -816,7 +831,9 @@ class MainWindow(QMainWindow):
             "compare": ConfigCompareWidget,
             "configio": ConfigIOWidget,
             "nlgen": NLGenWidget,
-            "trouble": TroubleshootWidget
+            "trouble": TroubleshootWidget,
+            "lint": LintWidget,
+            "convert": ConvertWidget
         }
         
         if tool_name in tool_widgets:
@@ -832,7 +849,9 @@ class MainWindow(QMainWindow):
                 "compare": "配置比较工具",
                 "configio": "配置导入导出",
                 "nlgen": "自然语言生成配置",
-                "trouble": "排错·重置命令速查"
+                "trouble": "排错·重置命令速查",
+                "lint": "配置语法纠错",
+                "convert": "跨厂商配置转换"
             }
             
             dialog.setWindowTitle(f"{titles.get(tool_name, tool_name)}")
@@ -1000,6 +1019,10 @@ class MainWindow(QMainWindow):
         interface_config = self.tabs["interface"].get_config()
         if interface_config:
             all_config.append(interface_config)
+        
+        adv_config = self.tabs["adv"].get_config()
+        if adv_config:
+            all_config.append(adv_config)
         
         if not all_config:
             QMessageBox.warning(self, "警告", "请至少配置一个模块！")

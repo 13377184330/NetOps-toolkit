@@ -75,10 +75,10 @@ def _between(seg, ctx):
 
 
 _SVI_RE = re.compile(r"^(?:vlanif|vlan-interface|vlan)\s*-?\s*(\d+)$", re.I)
-_SHORT_IF = [(re.compile(r"^(gi|ge|g|gigabitethernet)\s*-?\s*(.+)$", re.I), "GigabitEthernet"),
-             (re.compile(r"^(fa|fastethernet)\s*-?\s*(.+)$", re.I), "FastEthernet"),
-             (re.compile(r"^(te|tengigabitethernet|xge)\s*-?\s*(.+)$", re.I), "Ten-GigabitEthernet"),
-             (re.compile(r"^(eth|ethernet)\s*-?\s*(\d.*)$", re.I), "Ethernet")]
+_SHORT_IF = [(re.compile(r"^(gigabitethernet|gi|ge|g)\s*-?\s*(.+)$", re.I), "GigabitEthernet"),
+             (re.compile(r"^(fastethernet|fa)\s*-?\s*(.+)$", re.I), "FastEthernet"),
+             (re.compile(r"^(tengigabitethernet|xge|te)\s*-?\s*(.+)$", re.I), "Ten-GigabitEthernet"),
+             (re.compile(r"^(ethernet|eth)\s*-?\s*(\d.*)$", re.I), "Ethernet")]
 
 
 def _is_svi(raw: str) -> bool:
