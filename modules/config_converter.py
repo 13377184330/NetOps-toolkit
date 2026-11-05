@@ -10,12 +10,14 @@
 import re
 
 try:
+    from modules.config_visualizer import expand_vlan_body
     from modules.nl_engine import (e_hostname, e_iface, e_login, e_port_access,
                                    e_port_trunk, e_route, e_vlan_create)
 except ImportError:  # 直接运行本文件做自测时，把项目根目录补进 sys.path
     import os as _os
     import sys as _sys
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from modules.config_visualizer import expand_vlan_body
     from modules.nl_engine import (e_hostname, e_iface, e_login, e_port_access,
                                    e_port_trunk, e_route, e_vlan_create)
 
@@ -68,15 +70,16 @@ def parse_neutral(text: str, vendor: str) -> dict:
             neutral["ifaces"].append(cur)
             continue
 
-        m = re.match(r"^vlan\s+batch\s+([\d\s to]+)$", s, re.I)
+        m = re.match(r"^vlan\s+batch\s+([\d\s]+(?:to\s*[\d\s]+)?)$", s, re.I)
         if m:
-            for v in re.findall(r"\d+", m.group(1)):
-                _add_vlan(neutral, int(v))
+            for v in expand_vlan_body(m.group(1)):
+                _add_vlan(neutral, v)
             cur = None
             continue
-        m = re.match(r"^vlan\s+(\d+)\s*$", s, re.I)
-        if m:
-            _add_vlan(neutral, int(m.group(1)))
+        m = re.match(r"^vlan\s+(\d+(?:\s+to\s+\d+)?)\s*$", s, re.I)
+        if m and "vlanif" not in s.lower() and "vlan-interface" not in s.lower():
+            for v in expand_vlan_body(m.group(1)):
+                _add_vlan(neutral, v)
             cur = None
             continue
 

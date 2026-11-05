@@ -11,6 +11,14 @@
 
 import re
 
+try:
+    from modules.config_visualizer import expand_vlan_body
+except ImportError:  # 直接运行本文件做自测时，把项目根目录补进 sys.path
+    import os as _os
+    import sys as _sys
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+    from modules.config_visualizer import expand_vlan_body
+
 VRP = ("huawei", "h3c")
 IOS = ("ruijie", "maipu", "cisco")
 
@@ -80,15 +88,10 @@ def lint(text: str, vendor: str) -> dict:
             cur_iface = name
             continue
 
-        # VLAN 创建
-        m = re.match(r"^vlan\s+batch\s+([\d\s to]+)", low)
-        if m:
-            for v in re.findall(r"\d+", m.group(1)):
-                created_vlans.add(int(v))
-            continue
-        m = re.match(r"^vlan\s+(\d+)", low)
+        # VLAN 创建（含范围写法：vlan batch 10 to 20 / vlan 2 to 4094）
+        m = re.match(r"^vlan(?:\s+batch)?\s+([\d\s]+(?:to\s*[\d\s]+)?)$", low)
         if m and "vlanif" not in low and "vlan-interface" not in low:
-            created_vlans.add(int(m.group(1)))
+            created_vlans.update(expand_vlan_body(m.group(1)))
             continue
 
         # access 口引用
@@ -167,7 +170,8 @@ def lint(text: str, vendor: str) -> dict:
 
     # ---------- 交叉检查 ----------
     for vid, nos in access_refs.items():
-        if vid not in created_vlans:
+        # VLAN 1 所有交换机恒存在（默认 VLAN），配置里不显式出现——不算"未创建"（真机实测教训）
+        if vid not in created_vlans and vid != 1:
             add(nos[0], "严重", f"Access 口引用了未创建的 VLAN {vid}",
                 f"先创建：{'vlan batch ' if vendor == 'huawei' else 'vlan '}{vid}", "")
     for vid, nos in trunk_refs.items():

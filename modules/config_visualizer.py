@@ -157,6 +157,25 @@ def parse_security(text: str) -> list[str]:
     return items
 
 
+# ---------------------------------------------------------------- VLAN 声明展开
+def expand_vlan_body(body: str) -> list:
+    """VLAN 声明体展开：'10 20'→[10,20]；'10 to 20'→[10..20]；'2 to 4094'→[2..4094]
+    （真机实测教训：H3C/华为都支持范围写法，漏解析会把合法引用误判成"VLAN 未创建"）"""
+    toks = (body or "").split()
+    out = []
+    i = 0
+    while i < len(toks):
+        if (i + 2 < len(toks) and toks[i + 1].lower() == "to"
+                and toks[i].isdigit() and toks[i + 2].isdigit()):
+            out.extend(range(int(toks[i]), int(toks[i + 2]) + 1))
+            i += 3
+            continue
+        if toks[i].isdigit():
+            out.append(int(toks[i]))
+        i += 1
+    return out
+
+
 # ---------------------------------------------------------------- LLDP 邻居（拓扑）
 def parse_lldp(text: str) -> list[dict]:
     """解析 LLDP 邻居信息（H3C verbose / 华为 brief / Cisco show lldp neighbors 通用宽松解析）

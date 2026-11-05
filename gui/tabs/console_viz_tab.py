@@ -101,6 +101,7 @@ class _DeployWorker(QThread):
 
     def run(self):
         try:
+            ok_msg = ""
             with cr.ConsoleReader(self.port, self.baud, allow_write=True) as reader:
                 reader.detect()
                 self.log.emit(f"[下发] 已连接 {self.port}，开始下发 {len(self.lines)} 条命令…")
@@ -108,8 +109,11 @@ class _DeployWorker(QThread):
                 errs = [c for c, out in steps if any(k in out for k in ("% Unrecognized", "% Wrong", "Error:", "Incomplete"))]
                 if errs:
                     self.log.emit(f"[下发] 注意：{len(errs)} 条命令可能有语法问题：{errs[:3]}")
-                self.done.emit(True, f"已下发 {len(self.lines)} 条命令（未存盘）。"
-                                     f"\n有问题的命令：{len(errs)} 条" + (f"\n{errs[:3]}" if errs else ""))
+                ok_msg = (f"已下发 {len(self.lines)} 条命令（未存盘）。"
+                          f"\n有问题的命令：{len(errs)} 条" + (f"\n{errs[:3]}" if errs else ""))
+            # done 必须在 with 块外发：串口已关闭，否则主线程立即触发"自动重采"
+            # 会和新连接抢端口（SerialException: could not open port）——真机实测抓到的竞态
+            self.done.emit(True, ok_msg)
         except PermissionError as e:
             self.done.emit(False, str(e))
         except Exception as e:
