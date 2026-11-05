@@ -309,6 +309,8 @@ class TopologyView(QGraphicsView):
         super().__init__(scene, parent)
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # 不开鼠标跟踪时 hover 事件只在按住按键时才产生，悬停高亮会是死的（真机实测发现）
+        self.setMouseTracking(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet("QGraphicsView { background: #F7F9FC; border: 1px dashed #D3DBE7;"
@@ -592,8 +594,9 @@ class NetworkTopologyPage(QWidget):
     def _build_empty_state(self):
         from modules.host_info import local_host
         host = local_host()
+        ips = [i for i in host["ips"] if not i.startswith("169.254.")] or host["ips"]
         self._pc_node = DeviceNode(host["name"], "pc",
-                                   meta={"IP": ", ".join(host["ips"]) or "未获取",
+                                   meta={"IP": (ips[0] if ips else "未获取"),
                                          "角色": "运维终端（本机）"},
                                    subtitle="本机 PC")
         self._sw_node = DeviceNode("交换机（未采集）", "placeholder",
@@ -646,10 +649,11 @@ class NetworkTopologyPage(QWidget):
         me = local_host()
         my_macs = {normalize_mac(m) for m in me["macs"]}
 
-        # 本机 PC（始终存在）
+        # 本机 PC（始终存在）；IP 取首个非链路本地地址——右键 Ping 要直接可用
         pc_name = me["name"] or "本机 PC"
+        pc_ips = [i for i in me["ips"] if not i.startswith("169.254.")] or me["ips"]
         self._pc_node = DeviceNode(pc_name, "pc",
-                                   meta={"IP": ", ".join(me["ips"]) or "未获取",
+                                   meta={"IP": (pc_ips[0] if pc_ips else "未获取"),
                                          "角色": "运维终端（本机）",
                                          "Console": console_port or "—"},
                                    subtitle="本机 PC")
