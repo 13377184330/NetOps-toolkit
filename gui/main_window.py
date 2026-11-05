@@ -626,6 +626,17 @@ class MainWindow(QMainWindow):
         self._resize_edge = None
         super().mouseReleaseEvent(event)
 
+    def menuBar(self):
+        """缓存菜单栏引用。菜单栏被重挂进自定义标题栏（setMenuWidget）后，
+        Qt 5.15.10 Windows 下再走 QMainWindow.menuBar() 原生 getter 会触发
+        QMainWindowLayout 状态损坏 → 0xC0000005 原生崩溃（全量功能测试发现的地雷）。
+        Python 层一律返回缓存，杜绝任何后续代码路径踩雷。"""
+        mb = getattr(self, "_cached_menubar", None)
+        if mb is None:
+            mb = super().menuBar()
+            self._cached_menubar = mb
+        return mb
+
     def createMenuBar(self):
         """创建菜单栏"""
         menubar = self.menuBar()
@@ -755,7 +766,8 @@ class MainWindow(QMainWindow):
         template_menu = menubar.addMenu("模板(&M)")
         
         manager_action = QAction("模板管理器", self)
-        manager_action.setShortcut("Ctrl+M")
+        # Ctrl+M 已给「配置命令手册」：避免歧义快捷键双双失效，改为 Ctrl+Shift+M
+        manager_action.setShortcut("Ctrl+Shift+M")
         manager_action.triggered.connect(self.open_template_manager)
         template_menu.addAction(manager_action)
         
@@ -815,12 +827,16 @@ class MainWindow(QMainWindow):
     
     def open_network_tool(self, tool_name):
         """打开单个网络工具"""
-        from gui.tools_window import NetworkToolsWindow
+        from gui.tools_window import NetworkToolsWindow  # noqa: F401  （菜单弹窗用不到，保留导入位置）
         from gui.tools.subnet_tool import SubnetCalculatorWidget
         from gui.tools.ping_tool import PingTestWidget
         from gui.tools.port_tool import PortScanWidget
         from gui.tools.trace_tool import TraceRouteWidget
         from gui.tools.dns_tool import DNSToolWidget
+        from gui.tools.http_tool import HTTPStatusWidget
+        from gui.tools.mac_tool import MACToolWidget
+        from gui.tools.password_tool import PasswordGeneratorWidget
+        from gui.tools.encoder_tool import EncoderToolWidget
         from gui.tools.manual_tool import ManualToolWidget
         from gui.tools.config_compare_tool import ConfigCompareWidget
         from gui.tools.config_io_tool import ConfigIOWidget
@@ -837,6 +853,10 @@ class MainWindow(QMainWindow):
             "port": PortScanWidget,
             "trace": TraceRouteWidget,
             "dns": DNSToolWidget,
+            "http": HTTPStatusWidget,
+            "mac": MACToolWidget,
+            "password": PasswordGeneratorWidget,
+            "encoder": EncoderToolWidget,
             "manual": ManualToolWidget,
             "compare": ConfigCompareWidget,
             "configio": ConfigIOWidget,
@@ -857,6 +877,10 @@ class MainWindow(QMainWindow):
                 "port": "端口扫描",
                 "trace": "路由跟踪",
                 "dns": "DNS工具",
+                "http": "HTTP状态检测",
+                "mac": "MAC地址查询",
+                "password": "密码生成器",
+                "encoder": "编码转换器",
                 "manual": "配置命令速查手册",
                 "compare": "配置比较工具",
                 "configio": "配置导入导出",
@@ -1200,7 +1224,8 @@ class MainWindow(QMainWindow):
                 device_type=self.current_device_type,
                 config=config
             )
-            if manager.export_template(name, self.current_device_type, file_path):
+            # 全量测试修复：当前表单模板尚未存入注册表，须用导出对象方法（原按名查表必失败）
+            if manager.export_template_object(template, file_path):
                 QMessageBox.information(self, "成功", "模板导出成功！")
             else:
                 QMessageBox.warning(self, "失败", "导出模板失败。")

@@ -30,7 +30,9 @@ class PingWorker(QThread):
     result_ready = pyqtSignal(dict)
     batch_result_ready = pyqtSignal(list)
     
-    def __init__(self, host, count=4, timeout=2):
+    def __init__(self, host="", count=4, timeout=2):
+        # 全量测试修复：批量模式 start_batch_ping 以 PingWorker() 无参构造，
+        # 原签名 host 必填 → TypeError → 槽内异常 PyQt5 qFatal 直接崩应用；host 设默认即可
         super().__init__()
         self.host = host
         self.count = count

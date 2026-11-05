@@ -17,7 +17,8 @@ class Template:
     def __init__(self, name: str, device_type: str = "huawei", 
                  description: str = "", config: Dict = None,
                  created_time: str = None, modified_time: str = None,
-                 tags: List[str] = None, author: str = ""):
+                 tags: List[str] = None, author: str = "",
+                 is_builtin: bool = False):
         self.name = name
         self.device_type = device_type
         self.description = description
@@ -26,7 +27,9 @@ class Template:
         self.modified_time = modified_time or self.created_time
         self.tags = tags or []
         self.author = author
-        self.is_builtin = False
+        # 全量测试修复：from_dict 会传 is_builtin，原 __init__ 不收会 TypeError，
+        # 导致自定义模板存了就加载失败（保存功能实际是坏的）
+        self.is_builtin = is_builtin
     
     def to_dict(self) -> Dict:
         return {
@@ -353,6 +356,17 @@ class TemplateManager:
         )
         return self.save_template(new_template)
     
+    def export_template_object(self, template: 'Template', export_path: str) -> bool:
+        """导出任意模板对象到文件（全量测试修复：导出当前模板时模板尚未存入注册表，
+        原 export_template 按 name 查表必然失败，功能端到端是坏的）"""
+        try:
+            with open(export_path, 'w', encoding='utf-8') as f:
+                json.dump(template.to_dict(), f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            print(f"导出模板失败: {e}")
+            return False
+
     def export_template(self, name: str, device_type: str, export_path: str) -> bool:
         key = f"{device_type}_{name}"
         if key not in self.templates:

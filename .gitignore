@@ -10,6 +10,7 @@ venv/
 # 敏感配置（密钥与设备清单，含加密凭据，不入库！）
 config/secret.key
 config/devices.json
+templates/custom_templates.json
 
 # 备份与数据
 backups/

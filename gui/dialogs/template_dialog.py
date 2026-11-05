@@ -54,7 +54,13 @@ class TemplateManagerDialog(QDialog):
         
         filter_layout.addWidget(QLabel("设备类型:"))
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["全部", "华为", "H3C"])
+        # 全量测试修复：过滤器补齐五厂商（原来只有 全部/华为/H3C，
+        # 锐捷/迈普/思科菜单入口打开的是未过滤的全部列表，选首项会套错厂商模板）
+        self._vendor_cn = {"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷", "maipu": "迈普", "cisco": "思科"}
+        self._cn_list = ["全部"] + list(self._vendor_cn.values())
+        self.device_combo.addItems(self._cn_list)
+        self.device_combo.setCurrentIndex(
+            self._cn_list.index(self._vendor_cn.get(self.device_type, "全部")))
         self.device_combo.currentIndexChanged.connect(self.on_device_filter_changed)
         filter_layout.addWidget(self.device_combo)
         
@@ -227,7 +233,7 @@ class TemplateManagerDialog(QDialog):
         
         device_type = None
         if self.device_combo.currentText() != "全部":
-            device_map = {"华为": "huawei", "H3C": "h3c"}
+            device_map = {"华为": "huawei", "H3C": "h3c", "锐捷": "ruijie", "迈普": "maipu", "思科": "cisco"}
             device_type = device_map.get(self.device_combo.currentText())
         
         keyword = self.search_input.text().strip()
@@ -265,7 +271,9 @@ class TemplateManagerDialog(QDialog):
         
         if self.current_template:
             self.name_input.setText(self.current_template.name)
-            self.device_label.setText("华为" if self.current_template.device_type == "huawei" else "H3C")
+            self.device_label.setText({"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷",
+                                        "maipu": "迈普", "cisco": "思科"}.get(
+                self.current_template.device_type, self.current_template.device_type))
             self.desc_input.setPlainText(self.current_template.description)
             self.tags_label.setText(", ".join(self.current_template.tags))
             

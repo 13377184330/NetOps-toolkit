@@ -306,14 +306,21 @@ class ManualToolWidget(QWidget):
         self.status_bar.setText(f"✅ 查看: {data['name']}")
     
     def on_case_changed(self, index):
-        """案例选择变化"""
-        cases = HUAWEI_CASES if self.current_device == "huawei" else H3C_CASES
-        
+        """案例选择变化（全量测试修复：数据键为 steps 而非 config——键名错配会让
+        槽内 KeyError 触发 PyQt5 qFatal 原生崩溃；且补齐锐捷/迈普数据源映射）"""
+        cases_map = {
+            "huawei": HUAWEI_CASES,
+            "h3c": H3C_CASES,
+            "ruijie": RUIJIE_CASES,
+            "maipu": MAIPU_CASES
+        }
+        cases = cases_map.get(self.current_device, HUAWEI_CASES)
+
         if 0 <= index < len(cases):
             case = cases[index]
             self.case_title.setText(f"📋 {case['title']}")
             self.case_desc.setText(case['description'])
-            self.case_text.setPlainText(case['config'])
+            self.case_text.setPlainText("\n".join(case['steps']))
     
     def copy_case(self):
         """复制案例配置"""

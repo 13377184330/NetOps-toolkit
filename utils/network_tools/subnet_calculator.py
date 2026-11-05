@@ -248,32 +248,27 @@ class SubnetCalculator:
             return cidrs
         
         while start <= end:
-            max_size = 32
-            
-            while max_size > 0:
-                mask = SubnetCalculator.ip_to_int(SubnetCalculator.prefix_to_mask(max_size))
-                network = start & mask
-                
-                if network != start:
-                    max_size -= 1
-                    continue
-                
-                broadcast = network | (mask ^ 0xffffffff)
-                
-                if broadcast > end:
-                    max_size -= 1
-                    continue
-                
-                break
+            # 全量测试修复：原实现从 /32 往下试，/32 永远满足 → 永远逐 IP 输出 /32（100 个 IP 出 100 行）。
+            # 最小 CIDR 覆盖的正确贪婪方向：块从大到小（前缀从小到大），
+            # 取第一个「起点对齐 且 广播地址不越界」的块。
+            chosen = 32
+            for size in range(0, 33):
+                mask = SubnetCalculator.ip_to_int(SubnetCalculator.prefix_to_mask(size))
+                if start & mask != start:
+                    continue                     # 起点未按该前缀对齐
+                if start | (mask ^ 0xffffffff) <= end:
+                    chosen = size
+                    break                       # 能容纳的最大块
+            chosen_mask = SubnetCalculator.ip_to_int(SubnetCalculator.prefix_to_mask(chosen))
             
             cidrs.append({
                 "network": SubnetCalculator.int_to_ip(start),
-                "prefix": max_size,
-                "cidr": f"{SubnetCalculator.int_to_ip(start)}/{max_size}",
-                "mask": SubnetCalculator.prefix_to_mask(max_size),
-                "broadcast": SubnetCalculator.int_to_ip(start | (SubnetCalculator.ip_to_int(SubnetCalculator.prefix_to_mask(max_size)) ^ 0xffffffff))
+                "prefix": chosen,
+                "cidr": f"{SubnetCalculator.int_to_ip(start)}/{chosen}",
+                "mask": SubnetCalculator.prefix_to_mask(chosen),
+                "broadcast": SubnetCalculator.int_to_ip(start | (chosen_mask ^ 0xffffffff))
             })
             
-            start = start + (2 ** (32 - max_size))
+            start = start + (2 ** (32 - chosen))
         
         return cidrs
