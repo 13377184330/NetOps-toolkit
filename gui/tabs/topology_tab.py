@@ -19,9 +19,9 @@ Qt 原生图形框架实现，不重复造绘图轮子
 import math
 import re
 
-from PyQt5.QtCore import QPointF, QRectF, Qt
+from PyQt5.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
-                         QPainterPath, QPen)
+                          QPainterPath, QPen, QMouseEvent)
 from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox,
                               QDialog, QDialogButtonBox, QFormLayout,
                               QGraphicsItem, QGraphicsObject, QGraphicsScene,
@@ -1028,6 +1028,25 @@ class NetworkTopologyPage(QWidget):
             buttons.append(("删除节点", lambda: self._remove_node(node), "ghostButton"))
 
         DeviceDetailDialog(node.device_name, node.subtitle, rows, buttons, self).exec_()
+        # 面板是模态的：双击的收尾 release 会被模态事件循环吃掉，场景既认为按键仍按着、
+        # 抓取者也残留——用户关掉面板后的下一击会被重定向到旧节点（拖错节点/再双击又
+        # 弹旧面板，真机仪表实测：连点三个不同节点，后两次全部命中第一个节点）。
+        # 不能用 ungrabMouse 硬摘（按键逻辑未结束时 Qt 会触发 regrab，在物理光标位置
+        # 合成新 press，反而搅乱状态机）；正确做法是给场景补发那个丢失的 release，
+        # 让 press→release 周期干净收尾。singleShot(0) 保证在 mouseDoubleClickEvent
+        # 返回、抓取登记完成之后才执行。
+        def _finish_dblclick(n=node):
+            try:
+                if self.scene.mouseGrabberItem() is n:
+                    vp = self.view.viewport()
+                    pos = QPointF(vp.width() / 2, vp.height() / 2)
+                    QApplication.postEvent(vp, QMouseEvent(
+                        QEvent.MouseButtonRelease, pos,
+                        vp.mapToGlobal(pos.toPoint()),
+                        Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
+            except RuntimeError:      # 节点/视图已被销毁
+                pass
+        QTimer.singleShot(0, _finish_dblclick)
 
     def _show_node_menu(self, node, screen_pos):
         menu = QMenu(self)
