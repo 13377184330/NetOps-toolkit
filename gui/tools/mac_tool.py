@@ -5,8 +5,6 @@
 """
 
 import re
-from urllib.request import urlopen
-from urllib.error import URLError
 import json
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QGroupBox,

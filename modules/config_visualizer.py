@@ -307,11 +307,28 @@ def parse_arp(text: str) -> list[dict]:
     return rows
 
 
-def merge_end_hosts(mac_rows: list[dict], arp_rows: list[dict]) -> list[dict]:
-    """MAC 表 + ARP 表 → 终端清单 [{mac, mac_display, ip, port, vlan}]"""
+def merge_end_hosts(mac_rows: list[dict], arp_rows: list[dict], live_ports=None) -> list[dict]:
+    """MAC 表 + ARP 表 → 终端清单 [{mac, mac_display, ip, port, vlan}]
+    live_ports（可选）：链路 UP 的端口名集合。同一 MAC 出现在多个端口时
+    （真机实测：终端换口后旧口条目残留且端口已 DOWN），优先保留链路 UP 的那条，
+    避免把已下线的旧端口当成终端当前位置——这不该让人手工矗别。
+    未提供时保持全量（向后兼容）。"""
     ip_map = {r["mac"]: r["ip"] for r in (arp_rows or [])}
+    rows = list(mac_rows or [])
+    if live_ports is not None:
+        def _np(p):
+            return (p or "").strip().lower().replace(" ", "")
+        live_norm = {_np(p) for p in live_ports}
+        best = {}          # mac -> (是否链路UP, 行)
+        for r in rows:
+            mac = r["mac"]
+            live = _np(r.get("port", "")) in live_norm
+            cur = best.get(mac)
+            if cur is None or (live and not cur[0]):
+                best[mac] = (live, r)
+        rows = [v[1] for v in best.values()]
     hosts = []
-    for r in mac_rows or []:
+    for r in rows:
         hosts.append({
             "mac": r["mac"],
             "mac_display": r.get("mac_display") or _mac_display(r["mac"]),

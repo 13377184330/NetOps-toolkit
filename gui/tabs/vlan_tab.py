@@ -66,6 +66,14 @@ class VLANConfigTab(QWidget):
         self.interface_input.setPlaceholderText("例如: GigabitEthernet0/0/1")
         iface_form.addRow("接口:", self.interface_input)
         
+        pick_iface_btn = QPushButton("📋 从采集选择端口…（可多选批量加）")
+        pick_iface_btn.setObjectName("secondaryButton")
+        pick_iface_btn.setToolTip(
+            "列出最近一次 Console 采集到的物理端口（真实端口名，不用手敲），\n"
+            "多选后按当前 类型/VLAN 设置批量加入列表——与拓扑页「端口配置」共用同一份采集数据")
+        pick_iface_btn.clicked.connect(self.pick_interfaces_from_collect)
+        iface_form.addRow("", pick_iface_btn)
+        
         self.vlan_type_combo = QComboBox()
         self.vlan_type_combo.addItems(["access", "trunk", "hybrid"])
         self.vlan_type_combo.currentTextChanged.connect(self.on_vlan_type_changed)
@@ -194,6 +202,59 @@ class VLANConfigTab(QWidget):
             self.vlan_list.takeItem(row)
             del self.vlans[row]
     
+    def pick_interfaces_from_collect(self):
+        """从最近一次 Console 采集的端口列表多选，批量加入接口划分。
+        内网场景：端口名能从设备读到，就不该让人手工敲——
+        与拓扑页「端口配置」共用同一份采集数据（重复功能的输入来源统一）"""
+        main = self.window()
+        cv_tab = getattr(main, "tabs", {}).get("console_viz") if main else None
+        res = getattr(cv_tab, "_last_result", None)
+        parsed = (res or {}).get("parsed") or {}
+        ifaces = parsed.get("interfaces") or []
+        skip = ("vlan", "vlanif", "null", "m-gigabit", "mgigabit", "loopback", "inloop")
+        ports = [itf["name"] for itf in ifaces
+                 if not str(itf["name"]).lower().startswith(skip)]
+        if not ports:
+            QMessageBox.information(
+                self, "从采集选择",
+                "还没有可用的采集数据。\n\n请先在「Console 可视化」页点「连接并读取配置」，"
+                "端口列表会自动带出。")
+            return
+        from PyQt5.QtWidgets import QAbstractItemView, QDialog, QDialogButtonBox
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择端口（可多选）")
+        dlg.setMinimumSize(430, 480)
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(16, 14, 16, 12)
+        tip = QLabel(f"来自最近采集的 {len(ports)} 个物理端口；选中后按上方当前的 类型/VLAN 设置批量加入")
+        tip.setStyleSheet("color: #7A8699; font-size: 12px;")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+        lst = QListWidget()
+        lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        lst.setAlternatingRowColors(True)
+        lst.addItems(ports)
+        lay.addWidget(lst, 1)
+        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        box.accepted.connect(dlg.accept)
+        box.rejected.connect(dlg.reject)
+        lay.addWidget(box)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        sel = [it.text() for it in lst.selectedItems()]
+        if not sel:
+            return
+        added = 0
+        for p in sel:
+            self.interface_input.setText(p)
+            self.add_interface()
+            added += 1
+        if added:
+            QMessageBox.information(
+                self, "批量加入",
+                f"已按当前设置加入 {added} 个端口。\n（类型 / VLAN ID / Trunk VLANs 用的是表单当前值；"
+                "选中列表项可查看，误加可「删除选中」）")
+
     def add_interface(self):
         interface = self.interface_input.text().strip()
         if not interface:

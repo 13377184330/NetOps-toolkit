@@ -7,11 +7,14 @@ Console 只读可视化标签页（二开新增）
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
-                             QGroupBox, QComboBox, QPushButton, QLabel,
-                             QTreeWidget, QTreeWidgetItem, QTextEdit,
-                             QMessageBox, QProgressBar, QSpinBox)
+                              QGroupBox, QComboBox, QPushButton, QLabel,
+                              QTreeWidget, QTreeWidgetItem, QTextEdit,
+                              QMessageBox, QProgressBar, QSpinBox, QSplitter,
+                              QGridLayout)
 from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
+
+import re
 
 from modules import config_visualizer as cv
 from modules import console_reader as cr
@@ -224,10 +227,12 @@ class ConsoleVizTab(QWidget):
         health_lay.addWidget(self.health_list, 3)
         layout.addWidget(health_group, 2)
 
-        # ===== 配置原文 + 采集日志 左右并列（人体工程学：两者都是短句长语段的窄长文本，
-        #      竖排堆叠浪费横向空间且互相挤压高度；原文是主工作区占左大栏，日志作右窄栏）=====
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(14)
+        # ===== 配置原文 + 采集日志 左右并列（可拖分隔条自由调节）=====
+        # 人体工程学：长文本面板并列不挤压高度；日志默认拿足宽度（约四成），
+        # 用户可拖动中间分隔条按自己习惯调整（用户反馈：日志框太窄看得难受）
+        bottom_row = QSplitter(Qt.Horizontal)
+        bottom_row.setHandleWidth(8)
+        bottom_row.setChildrenCollapsible(False)
 
         # 配置原文（左：主工作区，可编辑 + 下发闭环：读到的东西能改、能回写）
         raw_group = QGroupBox("配置原文（可编辑 → 下发到设备）")
@@ -241,8 +246,6 @@ class ConsoleVizTab(QWidget):
             "配置原文显示在这里（可直接编辑）——改完点下方「下发到设备」写回交换机")
         raw_lay.addWidget(self.raw_view, 1)
 
-        raw_btn_row = QHBoxLayout()
-        raw_btn_row.setSpacing(8)
         self.save_btn = QPushButton("💾 保存配置文件（.cfg）")
         self.save_btn.setObjectName("secondaryButton")
         self.save_btn.clicked.connect(self.save_config)
@@ -255,24 +258,46 @@ class ConsoleVizTab(QWidget):
         self.reset_btn.setToolTip("丢弃编辑，恢复为最近一次采集到的原文")
         self.reset_btn.clicked.connect(
             lambda: self.raw_view.setPlainText(self._raw_config))
-        raw_btn_row.addWidget(self.reset_btn)
-        raw_btn_row.addStretch()
-        raw_btn_row.addWidget(self.save_btn)
-        raw_btn_row.addWidget(self.deploy_btn_c)
-        raw_lay.addLayout(raw_btn_row)
-        bottom_row.addWidget(raw_group, 3)
+        self.save_dev_btn = QPushButton("➕ 存入设备清单")
+        self.save_dev_btn.setObjectName("ghostButton")
+        self.save_dev_btn.setToolTip(
+            "把本次采集识别到的设备（名称/厂商/型号/管理IP）一键登记到「设备运维」清单，\n"
+            "人只补 SSH 凭据——能读到的信息不该让人手工抄一遍")
+        self.save_dev_btn.clicked.connect(self.save_to_device_list)
+
+        # 按钮行改 2×2 网格（真机实测：单行 4 按钮最小宽和≈710px，把配置原文组
+        # 顶死在最小宽，拖条比例失效、采集日志被挤到 194px 看不清——两行后最小宽降到
+        # ≈380px，6:4 比例才有得分配；主操作「下发」放右下符合视觉动线）
+        raw_btn_grid = QGridLayout()
+        raw_btn_grid.setSpacing(8)
+        raw_btn_grid.setContentsMargins(0, 0, 0, 0)
+        raw_btn_grid.addWidget(self.reset_btn, 0, 0)
+        raw_btn_grid.addWidget(self.save_btn, 0, 1)
+        raw_btn_grid.addWidget(self.save_dev_btn, 1, 0)
+        raw_btn_grid.addWidget(self.deploy_btn_c, 1, 1)
+        raw_btn_grid.setColumnStretch(0, 1)
+        raw_btn_grid.setColumnStretch(1, 1)
+        raw_lay.addLayout(raw_btn_grid)
+        bottom_row.addWidget(raw_group)
 
         # 采集日志（右：窄栏占满列高，随时可读）
+        # 可读下限：再窄的窗口也不把日志压成一条缝（用户反馈：日志框太窄看得难受）
         log_group = QGroupBox("采集日志")
+        log_group.setMinimumWidth(260)
         log_lay = QVBoxLayout(log_group)
         log_lay.setContentsMargins(12, 24, 12, 12)
         self.log_view = QTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
         log_lay.addWidget(self.log_view)
-        bottom_row.addWidget(log_group, 1)
+        bottom_row.addWidget(log_group)
 
-        layout.addLayout(bottom_row, 6)
+        # 默认比例：原文 6 : 日志 4（用户可拖分隔条自行调节，不会拖没）
+        bottom_row.setStretchFactor(0, 6)
+        bottom_row.setStretchFactor(1, 4)
+        bottom_row.setSizes([640, 430])
+
+        layout.addWidget(bottom_row, 6)
 
         self._last_result = None
         self._raw_config = ""
@@ -376,6 +401,60 @@ class ConsoleVizTab(QWidget):
         except Exception as e:
             self.log(f"[体检] 失败：{e}")
 
+    def save_to_device_list(self):
+        """把最近一次采集到的设备一键登记进「设备清单」：名称/厂商/型号/管理 IP 自动预填，
+        人只补 SSH 凭据（内网场景：能读到的信息不该让人手工抄一遍）"""
+        res = self._last_result
+        if not res:
+            QMessageBox.information(self, "存入设备清单",
+                                    "还没有采集数据。\n\n请先点「连接并读取配置」。")
+            return
+        main = self.window()
+        ops = getattr(main, "tabs", {}).get("device_ops") if main else None
+        if ops is None:
+            return
+        from gui.tabs.device_ops_tab import DeviceDialog
+        parsed = res.get("parsed") or {}
+        basic = parsed.get("basic") or {}
+        vendor = (res.get("vendor") or "").lower()
+        # 管理 IP：解析出的 Vlan-interface / Vlanif 三层地址
+        ip = ""
+        for itf in parsed.get("interfaces") or []:
+            d = itf.get("detail") or {}
+            if str(itf["name"]).lower().startswith(("vlan", "vlanif")) and d.get("IP"):
+                ip = str(d["IP"]).split()[0]
+                break
+        # 型号：从版本信息里提取（如 S5552S-EI）
+        m = re.search(r"\b([A-Z]{1,4}\d{3,5}[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)\b",
+                      res.get("version") or "")
+        model = m.group(1) if m else ""
+        pre = {"name": basic.get("主机名", "") or "未命名设备", "ip": ip,
+               "vendor": vendor, "model": model, "role": "access",
+               "notes": "Console 采集导入"}
+        if any(d.get("name") == pre["name"] and d.get("ip") == pre["ip"]
+               for d in ops.store.list_all()):
+            QMessageBox.information(
+                self, "存入设备清单",
+                f"设备 {pre['name']}（{pre['ip'] or '无管理 IP'}）已在清单中，未重复登记。")
+            return
+        dlg = DeviceDialog(pre, parent=self)
+        if not dlg.exec_():
+            return
+        data = dlg.data()
+        if not data["name"] or not data["ip"]:
+            QMessageBox.warning(
+                self, "提示",
+                "设备名称和管理 IP 必填（管理 IP 自动取自配置里的 Vlan-interface 地址，"
+                "若设备没有三层地址请手工填写可达的 SSH 地址）")
+            return
+        ops.store.add(data)
+        ops.refresh_table()
+        self.log(f"[设备] 已从采集导入设备清单：{data['name']} ({data['ip']})")
+        QMessageBox.information(
+            self, "存入设备清单",
+            f"已登记：{data['name']}（{data['ip']}）\n"
+            "可在「设备运维」页直接做 SSH 测试 / 命令执行 / 下发 / 备份。")
+
     def _sync_topology(self, result):
         """Console 采集的 LLDP 邻居 → 自动填充「网络拓扑」页"""
         try:
@@ -388,7 +467,9 @@ class ConsoleVizTab(QWidget):
             # 终端发现：MAC 表（谁接在哪个口）+ ARP 表（补 IP）
             mac_rows = cv.parse_mac_table(result.get("mac") or "")
             arp_rows = cv.parse_arp(result.get("arp") or "")
-            hosts = cv.merge_end_hosts(mac_rows, arp_rows)
+            # 同一 MAC 多条目（终端换口后旧口残留）优先保留链路 UP 的端口
+            lu_ports = {k for k, v in (result.get("link_up") or {}).items() if v}
+            hosts = cv.merge_end_hosts(mac_rows, arp_rows, live_ports=lu_ports)
             parsed_basic = result.get("parsed", {}).get("basic", {})
             local_name = parsed_basic.get("主机名", "")
             vendor = result.get("vendor") or ""

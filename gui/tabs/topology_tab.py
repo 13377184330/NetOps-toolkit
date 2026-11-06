@@ -17,6 +17,7 @@ Qt 原生图形框架实现，不重复造绘图轮子
 """
 
 import math
+import re
 
 from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
@@ -486,13 +487,14 @@ class PortConfigDialog(QDialog):
     （保持只读红线：写入永远走显式确认的下发闭环）。
     布局：左端口右表单底部预览——长文本/长列表左右并列，不上下堆叠压高度。"""
 
-    def __init__(self, ports, vendor, parent=None):
+    def __init__(self, ports, vendor, parent=None, vlan_map=None):
         super().__init__(parent)
         self.setWindowTitle("端口配置（Access / Trunk）")
         self.setMinimumSize(880, 560)
         self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         self._vendor = vendor or "huawei"
         self._lines = []          # [(cmd, 中文释义)]
+        self._vlan_map = vlan_map or {}   # 端口名 → 当前 Access VLAN（采集读到的，预填用）
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(18, 16, 18, 16)
@@ -522,6 +524,8 @@ class PortConfigDialog(QDialog):
             it.setData(Qt.UserRole, name)
             it.setToolTip(hint)
             self.port_list.addItem(it)
+        # 选中变化 → 自动预填当前 VLAN（能读到的信息不让人填）
+        self.port_list.itemSelectionChanged.connect(self._prefill_vlan)
         left.addWidget(self.port_list, 1)
         sel_row = QHBoxLayout()
         sel_all = QPushButton("全选")
@@ -599,6 +603,20 @@ class PortConfigDialog(QDialog):
     def _on_type_changed(self, idx):
         self.access_vlan.setEnabled(idx == 0)
         self.trunk_vlans.setEnabled(idx != 0)
+
+    def _prefill_vlan(self):
+        """选中端口后自动预填 Access VLAN：所有选中端口的当前 VLAN 一致才预填，
+        有任一读不到就不精（严禁猜测）；切换到 Trunk 时不干扰"""
+        if self.type_combo.currentIndex() != 0:
+            return
+        vals = set()
+        for it in self.port_list.selectedItems():
+            v = self._vlan_map.get(it.data(Qt.UserRole))
+            if v is None:
+                return
+            vals.add(v)
+        if len(vals) == 1:
+            self.access_vlan.setValue(vals.pop())
 
     def _plain(self):
         return "\n".join(cmd for cmd, _ in self._lines)
@@ -1153,10 +1171,16 @@ class NetworkTopologyPage(QWidget):
         if not ports:
             QMessageBox.information(self, "端口配置", "未解析出可配置的物理端口。")
             return
+        # 端口当前 Access VLAN 映射（选中后自动预填，能读到的信息不让人填）
+        vlan_map = {}
+        for itf in ifaces:
+            m = re.match(r"^(\d+)", str((itf.get("detail") or {}).get("VLAN", "")).strip())
+            if m:
+                vlan_map[itf["name"]] = int(m.group(1))
         # 注意：_data["vendor"] 存的是显示标签（如 "H3C"），发射器按小写厂商键匹配，
         # 必须小写化——否则语法分支全部落空、误走思科兜底
         vendor = (self._data.get("vendor") or "huawei").lower()
-        PortConfigDialog(ports, vendor, self).exec_()
+        PortConfigDialog(ports, vendor, self, vlan_map=vlan_map).exec_()
 
     def _backup_config(self):
         raw = self._data.get("raw") or ""
