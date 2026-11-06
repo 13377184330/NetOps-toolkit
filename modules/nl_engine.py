@@ -167,11 +167,48 @@ def e_login(vendor, user, pwd, ssh=True, telnet=False):
     return lines
 
 
+def _vlan_runs(vids):
+    """[1,5,92,999..1048] → [(1,1),(5,5),(92,92),(999,1048)]（连号≥3 才成段）"""
+    try:
+        vs = sorted({int(v) for v in vids})
+    except (TypeError, ValueError):
+        return None
+    runs, i = [], 0
+    while i < len(vs):
+        j = i
+        while j + 1 < len(vs) and vs[j + 1] == vs[j] + 1:
+            j += 1
+        runs.append((vs[i], vs[j]))
+        i = j + 1
+    return runs
+
+
 def e_vlan_create(vendor, vids):
+    runs = _vlan_runs(vids)
     if vendor == "huawei":
-        return [("system-view", "进入系统视图"), (f"vlan batch {' '.join(vids)}", "批量创建 VLAN")]
+        if runs:
+            # 连号段压缩（真机实测：60 个 VLAN 平铺一行不可读，vlan batch 999 to 1048 更标准）
+            toks = []
+            for a, b in runs:
+                if b >= a + 2:
+                    toks.append(f"{a} to {b}")
+                else:
+                    toks.extend(str(v) for v in range(a, b + 1))
+            body = " ".join(toks)
+        else:
+            body = " ".join(str(v) for v in vids)
+        return [("system-view", "进入系统视图"), (f"vlan batch {body}", "批量创建 VLAN")]
     if vendor == "h3c":
-        return [("system-view", "进入系统视图")] + [(f"vlan {v}", f"创建 VLAN {v}") for v in vids]
+        out = [("system-view", "进入系统视图")]
+        if runs:
+            for a, b in runs:
+                if b >= a + 2:
+                    out.append((f"vlan {a} to {b}", f"创建 VLAN {a}~{b}"))
+                else:
+                    out.extend((f"vlan {v}", f"创建 VLAN {v}") for v in range(a, b + 1))
+        else:
+            out.extend((f"vlan {v}", f"创建 VLAN {v}") for v in vids)
+        return out
     out = [("configure terminal", "进入配置模式")]
     for v in vids:
         out += [(f"vlan {v}", f"创建 VLAN {v}"), ("exit", "退出 VLAN 视图")]

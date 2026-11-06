@@ -70,7 +70,7 @@ def detect_vendor(text: str) -> str:
 def parse_neutral(text: str, vendor: str) -> dict:
     """配置文本 → {sysname, vlans, ifaces, routes, ssh, telnet, users}"""
     neutral = {"sysname": "", "vlans": [], "ifaces": [], "routes": [],
-               "ssh": False, "telnet": False, "users": []}
+               "ssh": False, "telnet": False, "users": [], "sub_ips": 0}
     if not text:
         return neutral
     lines = text.splitlines()
@@ -92,7 +92,7 @@ def parse_neutral(text: str, vendor: str) -> dict:
         m = re.match(r"^interface\s+(\S+)", s, re.I)
         if m:
             cur = {"name": m.group(1), "mode": "", "vlan": None,
-                   "trunk_vlans": [], "ip": "", "mask": "", "desc": "",
+                   "trunk_vlans": [], "trunk_removed": [], "ip": "", "mask": "", "desc": "",
                    "shut": ""}
             neutral["ifaces"].append(cur)
             continue
@@ -110,7 +110,8 @@ def parse_neutral(text: str, vendor: str) -> dict:
             cur = None
             continue
 
-        m = re.search(r"^ip\s+route(?:-static)?\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+)", s, re.I)
+        # 黑洞路由也解析（真机实测：ip route-static x.x.x.x 32 NULL0 曾被静默丢弃）
+        m = re.search(r"^ip\s+route(?:-static)?\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)\s+(\d+\.\d+\.\d+\.\d+|NULL0)", s, re.I)
         if m and cur is None:
             neutral["routes"].append({"dst": m.group(1), "mask": _norm_mask(m.group(2)), "nh": m.group(3)})
             continue
@@ -129,6 +130,18 @@ def parse_neutral(text: str, vendor: str) -> dict:
         # ---- 接口子命令 ----
         if cur is None:
             continue
+        # undo 撤销 trunk 放行（真机教训：undo port trunk permit vlan 1 曾被下面的 permit
+        # 正则误当「添加」解析，转换结果与源配置意图相反——华为/H3C trunk 默认放行
+        # VLAN 1，源配置显式撤销，转换必须同样撤销而不是放行）
+        m_undo = re.match(r"^undo\s+port\s+trunk\s+(?:permit|allow-pass)\s+vlan\s+([\d\s,，\-to]+)$", s, re.I)
+        if m_undo:
+            for v in re.findall(r"\d+", m_undo.group(1)):
+                v = int(v)
+                if v in cur["trunk_vlans"]:
+                    cur["trunk_vlans"].remove(v)
+                if v not in cur["trunk_removed"]:
+                    cur["trunk_removed"].append(v)
+            continue
         if re.search(r"port\s+link-type\s+access|switchport\s+mode\s+access", s, re.I):
             cur["mode"] = "access"
         elif re.search(r"port\s+link-type\s+trunk|switchport\s+mode\s+trunk", s, re.I):
@@ -144,7 +157,12 @@ def parse_neutral(text: str, vendor: str) -> dict:
                 cur["trunk_vlans"].append(int(v))
         m = re.search(r"ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", s, re.I)
         if m:
-            cur["ip"], cur["mask"] = m.group(1), m.group(2)
+            if re.search(r"\bsub\s*$", s, re.I):
+                # secondary IP（H3C 末尾 sub / 思科 secondary）：不覆盖主 IP，仅计数提示
+                # （真机实测：Vlan-interface999 的 secondary 曾把主 IP 覆盖掉）
+                neutral["sub_ips"] += 1
+            else:
+                cur["ip"], cur["mask"] = m.group(1), m.group(2)
         m = re.search(r"^description\s+(.+)$", s, re.I)
         if m:
             cur["desc"] = m.group(1).strip()
@@ -195,6 +213,14 @@ def convert(text: str, src_vendor: str, dst_vendor: str) -> dict:
             n_access += 1
         elif ifc["mode"] == "trunk" and ifc["trunk_vlans"]:
             lines += e_port_trunk(dst_vendor, name, [str(v) for v in ifc["trunk_vlans"]])
+            if ifc.get("trunk_removed"):
+                if dst_vendor in ("huawei", "h3c"):
+                    # 华为/H3C trunk 默认放行 VLAN 1：源配置显式 undo 撤销的 VLAN 必须同样撤销
+                    verb = "allow-pass" if dst_vendor == "huawei" else "permit"
+                    for v in ifc["trunk_removed"]:
+                        lines.append((f" undo port trunk {verb} vlan {v}",
+                                      f"撤销 trunk 默认放行的 VLAN {v}（源配置显式 undo）"))
+                # IOS 系 allowed 列表是绝对集合：不在列表中即已排除，无需额外命令
             n_trunk += 1
         elif ifc["ip"]:
             lines += e_iface(dst_vendor, name, ifc["ip"], ifc["mask"],
@@ -213,6 +239,8 @@ def convert(text: str, src_vendor: str, dst_vendor: str) -> dict:
         lines += e_route(dst_vendor, r["dst"], r["mask"], r["nh"])
     if n["routes"]:
         report.append(f"静态路由 {len(n['routes'])} 条")
+    if n.get("sub_ips"):
+        report.append(f"跳过 {n['sub_ips']} 个 secondary IP（仅保留主 IP，如需请手工补配）")
 
     if n["ssh"] or n["telnet"] or n["users"]:
         user = n["users"][0] if n["users"] else "admin"
