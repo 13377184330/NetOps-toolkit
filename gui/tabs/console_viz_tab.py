@@ -176,7 +176,7 @@ class ConsoleVizTab(QWidget):
         self.progress_label.setStyleSheet("color: #7A8699; font-size: 12px;")
         layout.addWidget(self.progress_label)
 
-        # ===== 单栏到底：配置概览 → 健康度 → 采集日志 → 配置原文（上下排列，不左右拉）=====
+        # ===== 主体单栏：配置概览 → 健康度上下排列；底部配置原文+采集日志左右并列 =====
         tree_group = QGroupBox("配置概览（分层）")
         tree_group.setMinimumHeight(260)
         tree_lay = QVBoxLayout(tree_group)
@@ -218,18 +218,12 @@ class ConsoleVizTab(QWidget):
         health_lay.addWidget(self.health_list, 3)
         layout.addWidget(health_group, 2)
 
-        # 采集日志（固定较小高度：只是操作记录）
-        log_group = QGroupBox("采集日志")
-        log_group.setMaximumHeight(150)
-        log_lay = QVBoxLayout(log_group)
-        log_lay.setContentsMargins(12, 24, 12, 12)
-        self.log_view = QTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
-        log_lay.addWidget(self.log_view)
-        layout.addWidget(log_group)
+        # ===== 配置原文 + 采集日志 左右并列（人体工程学：两者都是短句长语段的窄长文本，
+        #      竖排堆叠浪费横向空间且互相挤压高度；原文是主工作区占左大栏，日志作右窄栏）=====
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(14)
 
-        # 配置原文（可编辑 + 下发闭环：读到的东西能改、能回写）
+        # 配置原文（左：主工作区，可编辑 + 下发闭环：读到的东西能改、能回写）
         raw_group = QGroupBox("配置原文（可编辑 → 下发到设备）")
         raw_group.setMinimumHeight(240)
         raw_lay = QVBoxLayout(raw_group)
@@ -260,7 +254,19 @@ class ConsoleVizTab(QWidget):
         raw_btn_row.addWidget(self.save_btn)
         raw_btn_row.addWidget(self.deploy_btn_c)
         raw_lay.addLayout(raw_btn_row)
-        layout.addWidget(raw_group, 5)
+        bottom_row.addWidget(raw_group, 3)
+
+        # 采集日志（右：窄栏占满列高，随时可读）
+        log_group = QGroupBox("采集日志")
+        log_lay = QVBoxLayout(log_group)
+        log_lay.setContentsMargins(12, 24, 12, 12)
+        self.log_view = QTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setPlaceholderText("连接信息与采集日志显示在这里")
+        log_lay.addWidget(self.log_view)
+        bottom_row.addWidget(log_group, 1)
+
+        layout.addLayout(bottom_row, 6)
 
         self._last_result = None
         self._raw_config = ""

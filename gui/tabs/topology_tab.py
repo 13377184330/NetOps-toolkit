@@ -11,7 +11,7 @@
 
 交互：
   - 单击选中、拖动移动、滚轮缩放、空白处拖动平移
-  - 双击 / 右键 → 设备面板：查看配置 / 健康度 / 端口表 / Ping / 备份 / 复制
+  - 双击 / 右键 → 设备面板：端口配置 / 查看配置 / 健康度 / 端口表 / Ping / 备份 / 复制
   - 「一键采集」：不离开本页直接发起 Console 采集
 Qt 原生图形框架实现，不重复造绘图轮子
 """
@@ -21,14 +21,19 @@ import math
 from PyQt5.QtCore import QPointF, QRectF, Qt
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
                          QPainterPath, QPen)
-from PyQt5.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-                             QGraphicsItem, QGraphicsObject, QGraphicsScene,
-                             QGraphicsTextItem, QGraphicsView, QGroupBox,
-                             QHBoxLayout, QLabel, QLineEdit, QMenu, QMessageBox,
-                             QPushButton, QTableWidget, QTableWidgetItem,
-                             QVBoxLayout, QWidget, QHeaderView, QAbstractItemView)
+from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox,
+                              QDialog, QDialogButtonBox, QFormLayout,
+                              QGraphicsItem, QGraphicsObject, QGraphicsScene,
+                              QGraphicsTextItem, QGraphicsView, QGroupBox,
+                              QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                              QListWidgetItem, QMenu, QMessageBox,
+                              QPushButton, QSpinBox, QTableWidget,
+                              QTableWidgetItem, QTextEdit,
+                              QVBoxLayout, QWidget, QHeaderView)
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from modules.config_visualizer import expand_vlan_body
+from modules.nl_engine import e_port_access, e_port_trunk
 
 # ---------------------------------------------------------------- 视觉规范
 KIND_STYLE = {
@@ -454,6 +459,183 @@ class PortTableDialog(QDialog):
         lay.addLayout(row)
 
 
+class PortConfigDialog(QDialog):
+    """端口级配置生成器（Access/Trunk）——交换机最基础的操作。
+    端口列表来自最近一次采集的真实接口（多选），按当前设备厂商语法生成命令；
+    只生成不自动下发：命令送 Console「配置原文」框，由用户点「下发到设备」并确认后才写入设备
+    （保持只读红线：写入永远走显式确认的下发闭环）。
+    布局：左端口右表单底部预览——长文本/长列表左右并列，不上下堆叠压高度。"""
+
+    def __init__(self, ports, vendor, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("端口配置（Access / Trunk）")
+        self.setMinimumSize(880, 560)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
+        self._vendor = vendor or "huawei"
+        self._lines = []          # [(cmd, 中文释义)]
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(10)
+
+        tip = QLabel(f"多选左侧端口 → 按当前设备厂商（{self._vendor}）语法生成命令；"
+                     "「送往下发」会填入 Console 页，点「下发到设备」确认后才写入设备")
+        tip.setStyleSheet("color: #7A8699; font-size: 12px;")
+        tip.setWordWrap(True)
+        lay.addWidget(tip)
+
+        body = QHBoxLayout()
+        body.setSpacing(14)
+
+        # ---- 左：真实端口列表（多选；短行长列表适合窄栏） ----
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        left_lab = QLabel("端口（可多选 · 来自最近一次采集）")
+        left_lab.setStyleSheet("font-weight: bold;")
+        left.addWidget(left_lab)
+        self.port_list = QListWidget()
+        self.port_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.port_list.setAlternatingRowColors(True)
+        self.port_list.setStyleSheet("QListWidget::item { padding: 6px 4px; }")
+        for name, hint in ports:
+            it = QListWidgetItem(name if not hint else f"{name}  ·  {hint}")
+            it.setData(Qt.UserRole, name)
+            it.setToolTip(hint)
+            self.port_list.addItem(it)
+        left.addWidget(self.port_list, 1)
+        sel_row = QHBoxLayout()
+        sel_all = QPushButton("全选")
+        sel_all.setObjectName("ghostButton")
+        sel_all.clicked.connect(self.port_list.selectAll)
+        sel_none = QPushButton("清空")
+        sel_none.setObjectName("ghostButton")
+        sel_none.clicked.connect(self.port_list.clearSelection)
+        sel_row.addWidget(sel_all)
+        sel_row.addWidget(sel_none)
+        sel_row.addStretch()
+        left.addLayout(sel_row)
+        body.addLayout(left, 2)
+
+        # ---- 右：配置表单 ----
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        form = QFormLayout()
+        form.setSpacing(8)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(["Access（接入口）", "Trunk（干道口）"])
+        self.type_combo.currentIndexChanged.connect(self._on_type_changed)
+        form.addRow("链路类型:", self.type_combo)
+
+        self.access_vlan = QSpinBox()
+        self.access_vlan.setRange(1, 4094)
+        self.access_vlan.setValue(1)
+        form.addRow("Access VLAN:", self.access_vlan)
+
+        self.trunk_vlans = QLineEdit()
+        self.trunk_vlans.setPlaceholderText("放行 VLAN，空格分隔，支持 to，例：1 5 999 to 1048")
+        self.trunk_vlans.setEnabled(False)
+        form.addRow("Trunk 放行:", self.trunk_vlans)
+
+        self.desc_edit = QLineEdit()
+        self.desc_edit.setPlaceholderText("可选，例：dT:打印机")
+        form.addRow("接口描述:", self.desc_edit)
+
+        self.shut_check = QCheckBox("同时关闭端口（生成的命令里带 shutdown）")
+        form.addRow("", self.shut_check)
+
+        right.addLayout(form)
+
+        gen_btn = QPushButton("⚙ 生成命令")
+        gen_btn.setObjectName("primaryButton")
+        gen_btn.clicked.connect(self.generate)
+        right.addWidget(gen_btn)
+
+        self.preview = QTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setPlaceholderText("生成的命令（带中文释义）显示在这里")
+        right.addWidget(self.preview, 1)
+        body.addLayout(right, 3)
+
+        lay.addLayout(body, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        self.copy_btn = QPushButton("📋 复制纯命令")
+        self.copy_btn.setObjectName("secondaryButton")
+        self.copy_btn.clicked.connect(self.copy_commands)
+        self.send_btn = QPushButton("⤴ 送往下发（Console 页）")
+        self.send_btn.setObjectName("primaryButton")
+        self.send_btn.clicked.connect(self.send_to_deploy)
+        close_btn = QPushButton("关闭")
+        close_btn.setObjectName("ghostButton")
+        close_btn.clicked.connect(self.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(self.copy_btn)
+        btn_row.addWidget(self.send_btn)
+        btn_row.addWidget(close_btn)
+        lay.addLayout(btn_row)
+
+    def _on_type_changed(self, idx):
+        self.access_vlan.setEnabled(idx == 0)
+        self.trunk_vlans.setEnabled(idx != 0)
+
+    def _plain(self):
+        return "\n".join(cmd for cmd, _ in self._lines)
+
+    def generate(self):
+        ports = [it.data(Qt.UserRole) for it in self.port_list.selectedItems()]
+        if not ports:
+            QMessageBox.warning(self, "端口配置", "请先在左侧选择端口（按住 Ctrl/Shift 可多选）")
+            return
+        mode = "access" if self.type_combo.currentIndex() == 0 else "trunk"
+        desc = self.desc_edit.text().strip()
+        lines = []
+        for p in ports:
+            if mode == "access":
+                lines += e_port_access(self._vendor, p, str(self.access_vlan.value()))
+            else:
+                raw = self.trunk_vlans.text().strip()
+                if not raw:
+                    QMessageBox.warning(self, "端口配置", "Trunk 需要填写放行 VLAN（如：1 5 999 to 1048）")
+                    return
+                vids = [str(v) for v in expand_vlan_body(raw)]
+                lines += e_port_trunk(self._vendor, p, vids)
+            if desc:
+                lines.append((f" description {desc}", "接口描述（便于运维识别）"))
+            if self.shut_check.isChecked():
+                lines.append((" shutdown", "手工关闭端口"))
+        self._lines = lines
+        self.preview.setPlainText("\n".join(f"{c}   # {n}" for c, n in lines))
+
+    def copy_commands(self):
+        if not self._lines:
+            QMessageBox.warning(self, "端口配置", "请先点「生成命令」")
+            return
+        QApplication.clipboard().setText(self._plain())
+        QMessageBox.information(self, "端口配置", f"已复制 {len(self._lines)} 行纯命令（无注释），可直接粘贴")
+
+    def send_to_deploy(self):
+        """把生成的命令填入 Console 页「配置原文」框并跳转；真正的写入仍需用户点「下发到设备」确认"""
+        if not self._lines:
+            QMessageBox.warning(self, "端口配置", "请先点「生成命令」")
+            return
+        page = self.parent()          # NetworkTopologyPage
+        main = page.window() if page else None
+        cv = getattr(main, "tabs", {}).get("console_viz") if main else None
+        if cv is None:
+            QMessageBox.information(self, "端口配置", "未找到 Console 页（主窗口未就绪）")
+            return
+        if QMessageBox.question(
+                self, "送往下发",
+                f"将把 {len(self._lines)} 行命令填入 Console 页「配置原文」框（替换当前内容），\n"
+                "随后请在该页点「下发到设备」并确认——是否继续？") != QMessageBox.Yes:
+            return
+        cv.raw_view.setPlainText(self._plain())
+        page._goto("Console 可视化")
+        self.accept()
+
+
 class AddDeviceDialog(QDialog):
     """手工添加设备（没有 LLDP 时也能把真实网络画出来）"""
 
@@ -750,7 +932,8 @@ class NetworkTopologyPage(QWidget):
 
         if kind in ("switch", "placeholder"):
             buttons = [
-                ("查看完整配置", lambda: self._goto("Console 可视化"), "primaryButton"),
+                ("端口配置（Access/Trunk）", self.show_port_config, "primaryButton"),
+                ("查看完整配置", lambda: self._goto("Console 可视化"), "secondaryButton"),
                 ("配置健康度", self._show_health, "secondaryButton"),
                 ("端口一览", self.show_port_table, "secondaryButton"),
                 ("备份配置", self._backup_config, "secondaryButton"),
@@ -776,6 +959,7 @@ class NetworkTopologyPage(QWidget):
         menu.addAction("设备面板", lambda: self.open_device_panel(node))
         menu.addSeparator()
         if node.kind in ("switch", "placeholder"):
+            menu.addAction("端口配置（Access/Trunk）", self.show_port_config)
             menu.addAction("查看完整配置", lambda: self._goto("Console 可视化"))
             menu.addAction("配置健康度体检", self._show_health)
             menu.addAction("端口一览", self.show_port_table)
@@ -872,6 +1056,40 @@ class NetworkTopologyPage(QWidget):
                         r[4] = "、".join((h.get("ip") or h.get("mac_display", "")) for h in hs)
                         break
         PortTableDialog(rows, self).exec_()
+
+    def show_port_config(self):
+        """端口级配置（Access/Trunk）：交换机最基础的操作。
+        用采集到的真实端口列表 + 当前厂商语法生成命令，经 Console 下发闭环写回设备"""
+        parsed = (self._data.get("parsed") or {})
+        ifaces = parsed.get("interfaces") or []
+        if not ifaces:
+            QMessageBox.information(
+                self, "端口配置",
+                "还没有接口数据。\n\n请先点「🔌 一键采集」，端口列表会自动带出。")
+            return
+        # 只列物理/聚合端口（SVI、NULL、管理口不参与 access/trunk 划分）
+        skip = ("vlan", "vlanif", "null", "m-gigabit", "mgigabit", "loopback", "inloop")
+        ports = []
+        for itf in ifaces:
+            name = itf["name"]
+            if name.lower().startswith(skip):
+                continue
+            d = itf.get("detail") or {}
+            bits = []
+            if d.get("VLAN"):
+                bits.append(f"VLAN {d['VLAN']}")
+            if d.get("IP"):
+                bits.append(d["IP"])
+            if d.get("描述"):
+                bits.append(d["描述"])
+            ports.append((name, " · ".join(bits)))
+        if not ports:
+            QMessageBox.information(self, "端口配置", "未解析出可配置的物理端口。")
+            return
+        # 注意：_data["vendor"] 存的是显示标签（如 "H3C"），发射器按小写厂商键匹配，
+        # 必须小写化——否则语法分支全部落空、误走思科兜底
+        vendor = (self._data.get("vendor") or "huawei").lower()
+        PortConfigDialog(ports, vendor, self).exec_()
 
     def _backup_config(self):
         raw = self._data.get("raw") or ""

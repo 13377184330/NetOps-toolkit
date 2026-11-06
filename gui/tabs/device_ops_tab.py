@@ -230,9 +230,14 @@ class DeviceOpsTab(QWidget):
         self.deploy_btn.clicked.connect(self.deploy_config)
         self.backup_btn.clicked.connect(self.backup_config)
 
-        splitter.addWidget(ops_group)
+        # 下半左右并列：真机操作（表单紧凑）+ 执行结果（回显要宽）
+        # 人体工程学：两个长文本面板竖排会互相挤压高度，并列后各自有充足列高，分隔条可拖
+        ops_row = QSplitter(Qt.Horizontal)
+        ops_row.setHandleWidth(6)
+        ops_row.setChildrenCollapsible(False)
+        ops_row.addWidget(ops_group)
 
-        # 输出日志（给足高度：日志要看全）
+        # 输出日志（右：回显区，命令输出都是长文本）
         log_group = QGroupBox("执行结果")
         log_group.setMinimumHeight(200)
         log_layout = QVBoxLayout(log_group)
@@ -240,12 +245,17 @@ class DeviceOpsTab(QWidget):
         self.output = QTextEdit()
         self.output.setReadOnly(True)
         log_layout.addWidget(self.output)
-        splitter.addWidget(log_group)
+        ops_row.addWidget(log_group)
 
-        splitter.setStretchFactor(0, 4)   # 设备清单
-        splitter.setStretchFactor(1, 3)   # 真机操作
-        splitter.setStretchFactor(2, 3)   # 执行结果
-        splitter.setSizes([300, 250, 250])
+        ops_row.setStretchFactor(0, 2)   # 真机操作（表单）
+        ops_row.setStretchFactor(1, 3)   # 执行结果（回显）
+        ops_row.setSizes([430, 570])
+
+        splitter.addWidget(ops_row)
+
+        splitter.setStretchFactor(0, 4)   # 设备清单（表格要高）
+        splitter.setStretchFactor(1, 6)   # 操作+回显并列区
+        splitter.setSizes([300, 420])
 
     # ---------------- 工具方法 ----------------
     def log(self, text):
