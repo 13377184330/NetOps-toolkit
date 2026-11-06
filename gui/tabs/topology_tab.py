@@ -72,6 +72,13 @@ def _norm_port(p: str) -> str:
     return s
 
 
+def _usable_ip(v: str) -> str:
+    """可用 IP 提取：占位值（未获取/—/空）不算 IP
+    （真机实测：终端无 ARP 数据时 meta 存“未获取”，若不拦会生成「Ping 未获取」菜单项）"""
+    v = (v or "").split()[0] if (v or "").strip() else ""
+    return "" if v in ("", "未获取", "—", "-") else v
+
+
 # ---------------------------------------------------------------- 连线
 class LinkItem(QGraphicsItem):
     """两端节点之间的连线（位置实时跟随节点，无需重建）"""
@@ -992,11 +999,11 @@ class NetworkTopologyPage(QWidget):
             if ip:
                 buttons.append((f"Ping {ip}", lambda: self._ping(ip, node.device_name), "ghostButton"))
         elif kind == "pc":
-            buttons = [("Ping 本机", lambda: self._ping(node.meta.get("IP", ""), node.device_name),
+            buttons = [("Ping 本机", lambda: self._ping(_usable_ip(node.meta.get("IP", "")), node.device_name),
                         "secondaryButton"),
                        ("重新采集", self.collect_now, "primaryButton")]
         else:
-            ip = node.meta.get("IP", "")
+            ip = _usable_ip(node.meta.get("IP", ""))
             if ip:
                 buttons.append((f"Ping {ip}", lambda: self._ping(ip, node.device_name), "secondaryButton"))
             buttons.append(("复制信息", lambda: self._copy_node(node), "ghostButton"))
@@ -1020,13 +1027,13 @@ class NetworkTopologyPage(QWidget):
             menu.addSeparator()
             menu.addAction("重新采集", self.collect_now)
         elif node.kind == "pc":
-            ip = node.meta.get("IP", "")
+            ip = _usable_ip(node.meta.get("IP", ""))
             if ip:
                 menu.addAction(f"Ping {ip}", lambda: self._ping(ip, node.device_name))
             menu.addAction("重新采集", self.collect_now)
             menu.addAction("复制本机信息", lambda: self._copy_node(node))
         else:
-            ip = node.meta.get("IP", "")
+            ip = _usable_ip(node.meta.get("IP", ""))
             if ip:
                 menu.addAction(f"Ping {ip}", lambda: self._ping(ip, node.device_name))
             menu.addAction("复制设备信息", lambda: self._copy_node(node))
@@ -1172,7 +1179,7 @@ class NetworkTopologyPage(QWidget):
             QMessageBox.critical(self, "备份失败", f"{type(e).__name__}: {e}")
 
     def _ping(self, ip, name="设备"):
-        ip = (ip or "").split()[0]
+        ip = _usable_ip(ip)
         if not ip:
             QMessageBox.information(self, "Ping", "该设备没有可用的 IP 地址")
             return
