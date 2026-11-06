@@ -43,6 +43,7 @@ KIND_STYLE = {
     "neighbor":    ("#FFFFFF", "#0089FF", "#1F2A37", "#7A8699"),
     "pc":          ("#34C759", "#2BA84E", "#FFFFFF", "#DDF6E4"),
     "host":        ("#FFFFFF", "#8E9AAF", "#1F2A37", "#7A8699"),
+    "unknown":     ("#F7F9FC", "#C9D4E3", "#5A6B82", "#9AA7B8"),
 }
 NODE_ICON_W, NODE_ICON_H = 88, 58
 
@@ -59,6 +60,16 @@ def _short_port(port: str) -> str:
                       ("Port-channel", "Po")):
         p = p.replace(full, abbr)
     return p
+
+
+def _norm_port(p: str) -> str:
+    """端口名归一化（大小写/全称与缩写/空格差异 → 可比对）"""
+    s = (p or "").strip().lower().replace(" ", "")
+    for full, abbr in (("ten-gigabitethernet", "xge"), ("fortygige", "fge"),
+                       ("m-gigabitethernet", "mge"), ("gigabitethernet", "ge"),
+                       ("fastethernet", "fa"), ("ethernet", "eth")):
+        s = s.replace(full, abbr)
+    return s
 
 
 # ---------------------------------------------------------------- 连线
@@ -156,7 +167,7 @@ class DeviceNode(QGraphicsObject):
         painter.setRenderHint(QPainter.Antialiasing)
         fill, border = KIND_STYLE.get(self.kind, KIND_STYLE["host"])[:2]
         fill, border = QColor(fill), QColor(border)
-        if self.kind == "placeholder":
+        if self.kind in ("placeholder", "unknown"):
             pen = QPen(border, 2, Qt.DashLine)
         elif self._hover or self._active:
             pen = QPen(QColor("#0089FF") if self.kind != "host" else QColor("#5A6B82"), 3)
@@ -275,7 +286,9 @@ class TopologyScene(QGraphicsScene):
             return
         sw = next((n for n in nodes if n.kind in ("switch", "placeholder")), None)
         pc = next((n for n in nodes if n.kind == "pc"), None)
-        nbs = [n for n in nodes if n.kind == "neighbor"]
+        # 未识别设备与 LLDP 邻居同属下游设备，统一排到右侧
+        # （若不处理，unknown 节点会停留在 (0,0) 与交换机重叠，遮住悬停/拖动手势）
+        nbs = [n for n in nodes if n.kind in ("neighbor", "unknown")]
         hosts = [n for n in nodes if n.kind == "host"]
 
         if sw:
@@ -426,7 +439,7 @@ class PortTableDialog(QDialog):
         lay.setContentsMargins(18, 16, 18, 16)
         lay.setSpacing(10)
 
-        tip = QLabel("按接口列出配置与下挂终端（数据来自 running-config + MAC/ARP 表，只读）")
+        tip = QLabel("按接口列出配置/链路状态/下挂终端（running-config + MAC/ARP 表 + 端口链路状态，只读）")
         tip.setStyleSheet("color: #7A8699; font-size: 12px;")
         lay.addWidget(tip)
 
@@ -812,16 +825,18 @@ class NetworkTopologyPage(QWidget):
     # ---------------- 数据填充 ----------------
     def load_topology(self, local_name="", local_meta=None, neighbors=None,
                       end_hosts=None, parsed=None, raw_config="",
-                      console_port="", vendor="", health=None):
+                      console_port="", vendor="", health=None, link_up=None):
         """Console/SSH 采集完成后调用，重绘整张拓扑"""
         neighbors = neighbors or []
         end_hosts = end_hosts or []
         local_meta = dict(local_meta or {})
         parsed = parsed or {}
+        link_up = link_up or {}
         self._data = {
             "name": local_name, "meta": local_meta, "neighbors": neighbors,
             "hosts": end_hosts, "parsed": parsed, "raw": raw_config,
             "port": console_port, "vendor": vendor, "health": health,
+            "link_up": link_up,
         }
 
         self.scene.clear()
@@ -895,24 +910,58 @@ class NetworkTopologyPage(QWidget):
             self.scene.addItem(node)
             LinkItem(sw, node, "")   # 节点下方已标端口，连线不再重复写
 
+        # 有链路但没有任何发现数据的端口 → 「未识别设备」
+        # 真实场景：对端交换机未启用 LLDP（思科等出厂默认关）或哑交换机；
+        # 不标出来用户会以为软件坏了，标出来才是“看得见”的运维
+        known = set()
+        pc_port = self._pc_node.meta.get("接入端口", "")
+        if pc_port:
+            known.add(_norm_port(pc_port))
+        for nb in neighbors:
+            known.add(_norm_port(nb.get("port", "")))
+        for h in end_hosts:
+            known.add(_norm_port(h.get("port", "")))
+        skip_kw = ("vlan", "null", "inloop", "reg", "mge", "m-gigabit", "mgigabit",
+                   "loopback", "tunnel", "bridge-aggregation", "bagg")
+        unknown_ports = [n for n, up in link_up.items()
+                         if up and _norm_port(n) not in known
+                         and not n.lower().startswith(skip_kw)]
+        for i, port in enumerate(unknown_ports, 1):
+            label = "未识别设备" if len(unknown_ports) == 1 else f"未识别设备 {i}"
+            node = DeviceNode(label, "unknown",
+                              meta={"接入端口": port,
+                                    "说明": "端口有链路，但对端未响应 LLDP、也没有 MAC/ARP 数据"
+                                            "（对端未启用 LLDP 或为非管理型交换机）"},
+                              subtitle=f"{_short_port(port)} · 有链路")
+            self.scene.addItem(node)
+            LinkItem(sw, node, f"{_short_port(port)} · 有链路")
+
         self.scene.auto_layout()
         self.view.fit_content()
-        self._update_status(sw, neighbors, end_hosts)
+        self._update_status(sw, neighbors, end_hosts, unknown_ports)
 
-    def _update_status(self, sw, neighbors, end_hosts):
+    def _update_status(self, sw, neighbors, end_hosts, unknown_ports=None):
         parsed = self._data.get("parsed") or {}
         n_if = len(parsed.get("interfaces") or [])
         n_hosts = len(end_hosts)
+        unknown_ports = unknown_ports or []
         parts = [f"交换机：{self._data.get('name') or '未命名'}"]
         if n_if:
             parts.append(f"接口 {n_if}")
         parts.append(f"LLDP 邻居 {len(neighbors)}")
         parts.append(f"发现终端 {n_hosts}")
+        if unknown_ports:
+            parts.append(f"未识别链路 {len(unknown_ports)} 个")
         if not neighbors:
             parts.append("（终端不会应答 LLDP，靠 MAC 表发现）")
         self.status_label.setText(" ｜ ".join(parts))
 
-        if n_hosts == 0:
+        if unknown_ports:
+            ports_txt = "、".join(_short_port(p) for p in unknown_ports[:3])
+            self.hint_label.setText(
+                f"💡 {ports_txt} 有链路但对端未响应 LLDP——对端交换机可能没开 LLDP（思科等出厂默认关），"
+                "在对端执行 lldp run / lldp global enable 后再采集即可看到它的型号与端口")
+        elif n_hosts == 0:
             self.hint_label.setText(
                 "💡 没有发现终端：设备端口上可能没接设备，或终端长期空闲导致 MAC 表项老化。"
                 "换台在用的电脑接入后再采集即可看到它。")
@@ -925,7 +974,8 @@ class NetworkTopologyPage(QWidget):
         rows, buttons = [], []
         kind = node.kind
         rows.append(("设备类型", {"switch": "交换机（本机采集）", "pc": "本机 PC",
-                                  "neighbor": "邻居设备", "host": "终端设备"}.get(kind, "未知")))
+                                  "neighbor": "邻居设备", "host": "终端设备",
+                                  "unknown": "未识别设备（端口有链路，对端无 LLDP 信息）"}.get(kind, "未知")))
         for k, v in node.meta.items():
             if v not in (None, ""):
                 rows.append((k, v))
@@ -1034,14 +1084,24 @@ class NetworkTopologyPage(QWidget):
         for h in self._data.get("hosts") or []:
             by_port.setdefault(h.get("port", ""), []).append(h)
 
+        # 真实链路状态（display interface brief，采集时一并抓取）——有实时值优先用实时值
+        link_up = self._data.get("link_up") or {}
+        live_map = {_norm_port(k): v for k, v in link_up.items()}
+
         def norm(p):
             return (p or "").lower().replace("gigabitethernet", "ge").replace(" ", "")
 
         rows = []
         for itf in ifaces:
             d = itf.get("detail") or {}
-            status = "down" if d.get("状态") else ("up" if d.get("描述") or d.get("IP")
-                                                   or d.get("VLAN") else "—")
+            live = live_map.get(_norm_port(itf["name"]))
+            if live is True:
+                status = "up"
+            elif live is False:
+                status = "down"
+            else:
+                status = "down" if d.get("状态") else ("up" if d.get("描述") or d.get("IP")
+                                                       or d.get("VLAN") else "—")
             hosts = by_port.get(itf["name"], [])
             rows.append([
                 itf["name"], status, d.get("描述", ""),

@@ -166,6 +166,49 @@ VENDOR_ARP_CMD = {
     "cisco": "show arp",
 }
 
+# 端口链路状态（只读）：有链路但无 LLDP/无 MAC 的端口 = 未识别对端
+# （真机实测：对端交换机出厂 LLDP 默认关闭很常见，拓扑不能因此装聋作哑）
+VENDOR_BRIEF_CMD = {
+    "huawei": "display interface brief",
+    "h3c": "display interface brief",
+    "ruijie": "show interfaces status",
+    "maipu": "show interfaces status",
+    "cisco": "show ip interface brief",
+}
+
+
+def parse_link_up_ports(vendor: str, text: str) -> dict:
+    """从接口一览输出解析端口链路状态 → {端口名: True(UP)}
+    解析不出返回空 dict（优雅降级，不影响采集主流程）。
+    H3C/华为 display interface brief：首列端口名 + 次列 UP/DOWN/ADM
+    IOS 系 show ip interface brief：行尾 Status+Protocol 两列 up/down
+    IOS 系 show interfaces status：首列端口名 + 次列 up/down
+    （注：锐捷/迈普接口名含空格时此解析可能为空，属已知降级）"""
+    out = {}
+    if not text:
+        return out
+    for ln in text.splitlines():
+        s = ln.strip()
+        if not s:
+            continue
+        if vendor in ("huawei", "h3c"):
+            m = re.match(r"^([A-Za-z][\w./:-]*)\s+(up|down|adm)\b", s, re.I)
+            if m:
+                name = m.group(1).rstrip(":")
+                if name.lower() not in ("interface", "link", "protocol", "duplex",
+                                        "inloop0", "reg0"):
+                    out[name] = m.group(2).lower() == "up"
+        else:
+            m = re.match(r"^([A-Za-z][\w./:-]*)\s+.*\b(up|down|administratively\s+down)\s+(up|down)\s*$",
+                         s, re.I)
+            if m:
+                out[m.group(1)] = (m.group(2).lower() == "up" and m.group(3).lower() == "up")
+                continue
+            m = re.match(r"^([A-Za-z][\w./:-]*)\s+(up|down)\b", s, re.I)
+            if m:
+                out[m.group(1)] = m.group(2).lower() == "up"
+    return out
+
 
 def _send(ser, command: str, allow_write: bool = False):
     """命令发送出口。allow_write=False 时强校验只读（安全默认）；
@@ -286,6 +329,15 @@ class ConsoleReader:
             self.detect()
         cmd = VENDOR_ARP_CMD.get(self.vendor, "display arp")
         return self._exec(cmd, max_wait=25)
+
+    def read_link_state(self):
+        """抓取端口链路状态（只读）→ {端口名: True/False}
+        用途：拓扑上把「有链路但未响应 LLDP、也无 MAC 数据」的端口标成未识别设备"""
+        if self.vendor is None:
+            self.detect()
+        cmd = VENDOR_BRIEF_CMD.get(self.vendor, "display interface brief")
+        raw = self._exec(cmd, max_wait=25)
+        return parse_link_up_ports(self.vendor, raw)
 
     # ---------------- 配置下发（需显式 allow_write） ----------------
     def send_config(self, config_lines, apply_mode=True, save=False):

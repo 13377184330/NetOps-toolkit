@@ -38,7 +38,7 @@ class _ConsoleWorker(QThread):
 
     def run(self):
         result = {"vendor": None, "version": "", "config": "", "parsed": None,
-                  "lldp": "", "mac": "", "arp": "", "health": None}
+                  "lldp": "", "mac": "", "arp": "", "link_up": {}, "health": None}
         try:
             self.log.emit(f"[Console] 打开 {self.port} @ {self.baud} …")
             with cr.ConsoleReader(self.port, self.baud) as reader:
@@ -76,6 +76,12 @@ class _ConsoleWorker(QThread):
                     result["arp"] = reader.read_arp()
                 except Exception as e:
                     self.log.emit(f"[Console] ARP 表采集跳过：{e}")
+                # 端口链路状态：识别「有链路但对端未响应 LLDP」的端口（对端交换机没开 LLDP 时拓扑不至于瞎眼）
+                self.progress.emit(97, "采集端口链路状态（识别未响应 LLDP 的对端）…")
+                try:
+                    result["link_up"] = reader.read_link_state()
+                except Exception as e:
+                    self.log.emit(f"[Console] 链路状态采集跳过：{e}")
                 self.progress.emit(100, "完成")
                 self.log.emit(f"[Console] 抓取完成：{len(result['config'])} 字节配置")
                 self.done.emit(True, result)
@@ -401,9 +407,12 @@ class ConsoleVizTab(QWidget):
                 console_port=self.port_combo.currentData() or "",
                 vendor=VENDOR_LABELS.get(vendor, ""),
                 health=result.get("health"),
+                link_up=result.get("link_up") or {},
             )
+            lu = result.get("link_up") or {}
             self.log(f"[拓扑] 已更新：LLDP 邻居 {len(neighbors)} 台，"
-                     f"终端（MAC 表）{len(hosts)} 台")
+                     f"终端（MAC 表）{len(hosts)} 台"
+                     + (f"，链路 UP {sum(1 for v in lu.values() if v)} 口" if lu else ""))
         except Exception as e:
             self.log(f"[拓扑] 更新失败：{e}")
 
