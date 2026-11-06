@@ -163,7 +163,11 @@ class ConfigCompareWidget(QWidget):
         )
         
         diff_text = '\n'.join(diff)
-        
+
+        # 真机实测改进：完全相同的配置 unified_diff 输出为空，结果区一片空白会让用户
+        # 以为没反应——给出明确的「完全相同」反馈
+        if not diff_text.strip():
+            diff_text = f"✅ 两份配置完全相同（0 处差异）\n\n共 {len(left_lines)} 行，逐行一致。"
         self.result_text.setPlainText(diff_text)
         
         additions = diff_text.count('+') - diff_text.count('+++')

@@ -15,7 +15,9 @@ SRC_VENDORS = ["auto", "huawei", "h3c", "ruijie", "maipu", "cisco"]
 DEMO = """
  sysname Core-SW-01
 #
-vlan batch 10 20
+vlan 10
+#
+vlan 20
 #
 telnet server enable
 #
@@ -34,6 +36,8 @@ interface Vlan-interface10
 #
  ip route-static 0.0.0.0 0.0.0.0 192.168.10.254
 """.strip()
+# 真机实测修正：原示例混用了华为的「vlan batch 10 20」，会被厂商识别判定为华为；
+# 标准 H3C 建多 VLAN 是逐个 vlan <id>（或 vlan <a> to <b>）
 
 
 class ConvertWidget(QWidget):

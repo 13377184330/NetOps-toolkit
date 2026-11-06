@@ -195,9 +195,24 @@ class ConsoleReader:
         self.close()
 
     def open(self):
+        # write_timeout：真机实测教训——USB 串口适配器驱动层偶尔卡死时 ser.write() 无限阻塞
+        # （下发线程挂死 250s+，UI 永远「忙」）；加写超时让卡死变成可报错的异常
         self.ser = serial.Serial(self.port, self.baud, bytesize=8,
-                                 parity="N", stopbits=1, timeout=0.2)
+                                 parity="N", stopbits=1, timeout=0.2, write_timeout=5)
         self.ser.reset_input_buffer()
+        self._prompt_synced = False
+
+    def _sync_prompt(self):
+        """会话首条命令前的提示符同步（真机实测连锁陷阱的修复）：
+        sysname 不含厂商名时（如 Core-SW-01 / Test-Run-01），detect() 的提示符快路径
+        失效，走 display version 慢兜底——返回时设备发送队列里还压着未画完的提示符，
+        此时打字首字符必被设备行编辑器吞掉（% Unrecognized 且回显缺首字母）。
+        正确握手：发回车 → 等设备把新提示符画完（读到空闲）→ 再打字。
+        （旧教训「回车后直接打字会吞首字符」仍然成立，差的就是等提示符画完这一步）"""
+        self.ser.write(b"\r\n")
+        time.sleep(0.3)
+        read_until_idle(self.ser, max_wait=4.0)
+        self._prompt_synced = True
 
     def close(self):
         if self.ser and self.ser.is_open:
@@ -208,19 +223,20 @@ class ConsoleReader:
         return self.vendor
 
     def _exec(self, cmd: str, max_wait: float = 30.0):
-        """内部统一执行（实测对拍结论）：
-        会话建立时已唤醒（detect），此处直接：静默排空 → 逐字符发命令 → 读取到空闲。
-        （实测教训：发送前敲回车唤醒会导致设备输入行竞争吞首字符，绝不能发）"""
-        # 1) 静默排空（读到 300ms 无数据为止，清残留不吐回显）
+        """内部统一执行：首条命令前先同步提示符，随后静默排空 → 逐字符发送 → 读到空闲。"""
+        # 0) 会话首条命令前同步提示符（防首字符被吞，见 _sync_prompt 注释）
+        if not getattr(self, "_prompt_synced", False):
+            self._sync_prompt()
+        # 1) 静默排空（读到 0.8s 无数据为止，清残留不吐回显）
         quiet = 0.0
-        deadline = time.time() + 3.0
+        deadline = time.time() + 4.0
         while time.time() < deadline:
             if self.ser.in_waiting:
                 self.ser.read(self.ser.in_waiting)
                 quiet = 0.0
             else:
                 quiet += 0.05
-                if quiet >= 0.3:
+                if quiet >= 0.8:
                     break
                 time.sleep(0.05)
         # 2) 逐字符发送

@@ -27,13 +27,40 @@ IOS = ("ruijie", "maipu", "cisco")
 
 # ---------------------------------------------------------------- 厂商识别
 def detect_vendor(text: str) -> str:
+    """按信号强度排序：强语法标记 > 服务命令 > sysname 出厂默认值启发式。
+    真机实测教训：精简配置（无 SSH/无 SVI）没有任何强标记，
+    只剩 sysname 值可判（H3C 出厂默认 sysname 即 "H3C"，华为为 "Huawei"）。"""
     t = (text or "").lower()
-    if "stelnet" in t or re.search(r"\bvlanif", t):
+    # 1) 华为特有：Vlanif SVI / vlan batch 批量建 VLAN
+    if re.search(r"\bvlanif", t) or "vlan batch" in t:
         return "huawei"
-    if "vlan-interface" in t or "ssh server enable" in t or "comware" in t:
+    # 2) H3C 特有：Vlan-interface SVI / Comware 字样
+    if "vlan-interface" in t or "comware" in t:
         return "h3c"
+    # 3) 块式语法家族
     if "switchport" in t or "running-config" in t or re.search(r"^hostname\s", text or "", re.M):
         return "cisco"
+    # 4) 服务命令：stelnet 为华为 VRP 写法（stelnet server enable）
+    if "stelnet" in t:
+        return "huawei"
+    # 5) H3C Comware 的 SSH 开启写法
+    if "ssh server enable" in t:
+        return "h3c"
+    # 6) sysname 值启发式：出厂默认/常见命名（H3C→"H3C"，华为→"Huawei"，锐捷 RG，迈普，思科）
+    m = re.search(r"^ ?sysname\s+(\S+)", text or "", re.M | re.I)
+    if m:
+        v = m.group(1).lower()
+        if "h3c" in v:
+            return "h3c"
+        if "huawei" in v or v.startswith("hw"):
+            return "huawei"
+        if "ruijie" in v or v.startswith("rg"):
+            return "ruijie"
+        if "maipu" in v:
+            return "maipu"
+        if "cisco" in v:
+            return "cisco"
+    # 7) 弱默认
     if "ip route-static" in t or re.search(r"^ ?sysname\s", text or "", re.M):
         return "huawei"
     return "huawei"
