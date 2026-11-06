@@ -24,8 +24,13 @@ def parse_basic(text: str) -> dict:
     m = re.search(r"version\s+([\d.]+),?\s*(Release\s+\S+)?", text)
     if m:
         info["软件版本"] = (m.group(1) + (" " + m.group(2) if m.group(2) else "")).strip()
-    if "irf" in text:
-        info["堆叠(IRF)"] = "启用" if re.search(r"^\s*irf\s+auto-update enable", text, re.M) else "未启用"
+    if re.search(r"^\s*(?:irf|mad)\b", text, re.M):
+        # 真堆叠标志：irf-port 成员绑定段（如 irf-port 1/1 + port group interface）或 MAD 配置。
+        # 出厂单机也带 irf auto-update enable / irf member 1 priority 1 等默认行，不构成"启用"
+        # （真机实测：交换机1 S5552S-EI-D 与交换机3 出厂配置均含默认行，旧逻辑一律误判"启用"）。
+        enabled = (re.search(r"^\s*irf-port\s+\d+/\d+", text, re.M)
+                   or re.search(r"^\s*mad\s+(?:bfd\s+)?enable", text, re.M))
+        info["堆叠(IRF)"] = "启用" if enabled else "未启用"
     if re.search(r"^\s*stp global enable", text, re.M) or "stp enable" in text:
         info["STP"] = "启用"
     if re.search(r"^\s*lldp global enable", text, re.M) or "lldp enable" in text:

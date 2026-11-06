@@ -77,7 +77,10 @@ def _between(seg, ctx):
 _SVI_RE = re.compile(r"^(?:vlanif|vlan-interface|vlan)\s*-?\s*(\d+)$", re.I)
 _SHORT_IF = [(re.compile(r"^(gigabitethernet|gi|ge|g)\s*-?\s*(.+)$", re.I), "GigabitEthernet"),
              (re.compile(r"^(fastethernet|fa)\s*-?\s*(.+)$", re.I), "FastEthernet"),
-             (re.compile(r"^(tengigabitethernet|xge|te)\s*-?\s*(.+)$", re.I), "Ten-GigabitEthernet"),
+             # 注意顺序：带连字符全名 ten-gigabitethernet 必须排在短名 te 之前，
+             # 否则全名的前缀 "Te" 会被短名分支再展开一次（真机 Ten-GE 口实测踩中：
+             # Ten-GigabitEthernet1/0/27 → Ten-GigabitEthernetn-GigabitEthernet1/0/27）
+             (re.compile(r"^(tengigabitethernet|ten-gigabitethernet|xge|te)\s*-?\s*(.+)$", re.I), "Ten-GigabitEthernet"),
              (re.compile(r"^(ethernet|eth)\s*-?\s*(\d.*)$", re.I), "Ethernet")]
 
 

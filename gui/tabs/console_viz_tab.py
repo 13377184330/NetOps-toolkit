@@ -359,6 +359,13 @@ class ConsoleVizTab(QWidget):
         self._last_result = result
         self._raw_config = result["config"]
         self.raw_view.setPlainText(result["config"])
+        # 采集保真度守卫：设备异步日志（% 开头，如端口 UP/DOWN、命令审计 SHELL_CMD）会在
+        # 命令输出的抓取窗口期内混进抓取内容（真机实测：乱接线后首采比稳定值多 1 行 224 字节）。
+        # 原文按收到的如实保留，但必须提醒用户而不是让日志行静默污染解析。
+        poll = [l for l in result["config"].splitlines() if l.lstrip().startswith("%")]
+        if poll:
+            self.log(f"[提示] 抓取内容混入 {len(poll)} 行设备异步日志（% 开头，"
+                     f"示例：{poll[0][:60]}…）——解析可能受影响，建议重新采集一次")
         self._build_tree(result)
         self._sync_brand_combo(result.get("vendor"))
         self._build_health(result)
