@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                              QLabel, QLineEdit, QListWidget, QPushButton,
                              QScrollArea, QVBoxLayout, QWidget)
 
+from gui.dialogs.base import info_box, warn_box
 from modules.adv_modules import MODULES
 from modules.nl_engine import VENDOR_CN
 
@@ -138,8 +139,7 @@ class AdvConfigTab(QWidget):
         try:
             lines = mod["gen"](vendor, self._params())
         except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "生成失败", f"{type(e).__name__}: {e}")
+            warn_box(self, "生成失败", f"{type(e).__name__}: {e}")
             return
         if not lines:
             return
@@ -163,13 +163,12 @@ class AdvConfigTab(QWidget):
                 f"{i + 1}. {name} · {VENDOR_CN.get(vendor, vendor)} · {len(lines)} 条命令")
 
     def _peek_block(self, item):
-        from PyQt5.QtWidgets import QMessageBox
         i = self.blocks_list.row(item)
         if 0 <= i < len(self._blocks):
             name, (vendor, lines) = self._blocks[i]
             text = "\n".join(f"{c}    # {n}" for c, n in lines)
-            QMessageBox.information(self, f"配置块：{name}",
-                                    f"厂商：{VENDOR_CN.get(vendor, vendor)}\n\n{text}")
+            info_box(self, f"配置块：{name}",
+                     f"厂商：{VENDOR_CN.get(vendor, vendor)}\n\n{text}")
 
     # ---------------- 契约方法 ----------------
     def get_config(self):

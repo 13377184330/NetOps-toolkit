@@ -14,6 +14,10 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QT_VERSION_STR
 from PyQt5.QtGui import QFont, QPalette, QColor
 
+# 主题引擎：必须在创建任何控件之前打补丁（把浅色词汇的样式串按当前主题翻译）
+from gui import theme as _theme
+_theme.install()
+
 # 高分屏适配：让系统 DPI 缩放接管，避免 Qt 内部两次换算导致文字发糊/挤压（150% DPI 环境实测）
 if hasattr(Qt, "AA_EnableHighDpiScaling"):
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -28,21 +32,31 @@ APP_NAME = "NetOps Toolkit"
 APP_VERSION = "4.0"
 
 
+def _startup_theme(app):
+    """启动时应用主题：浅色 / 深色 / 跟随系统（存的是偏好，这里归一化成实际主题）"""
+    pref = "light"
+    try:
+        from utils.settings import Settings
+        pref = Settings().get("theme", "light") or "light"
+    except Exception:
+        pass
+    if pref == "system":
+        pref = _theme.system_theme()
+    _theme.set_theme(pref if pref in ("light", "dark") else "light", app)
+
+
 def main():
     """主函数"""
     app = QApplication(sys.argv)
-    
+
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(APP_VERSION)
-    
+
     font = QFont("Microsoft YaHei UI", 9)
     app.setFont(font)
-    
-    # 输入框占位文字对比度（QSS 无 placeholder 伪态，由 QPalette 兑底）
-    palette = app.palette()
-    palette.setColor(QPalette.PlaceholderText, QColor("#8A95A6"))
-    app.setPalette(palette)
-    
+
+    _startup_theme(app)
+
     splash_manager = SplashManager(app)
     
     def on_splash_complete():
@@ -57,13 +71,15 @@ def main():
 def run_tools():
     """运行网络工具箱"""
     app = QApplication(sys.argv)
-    
+
     app.setApplicationName("网络工具箱")
     app.setApplicationVersion("1.0")
-    
+
     font = QFont("Microsoft YaHei UI", 9)
     app.setFont(font)
-    
+
+    _startup_theme(app)
+
     splash_manager = SplashManager(app)
     
     def on_splash_complete():

@@ -14,6 +14,8 @@ import sys
 import math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from gui import theme
+
 
 class ModernSplashScreen(QWidget):
     """现代风格启动画面"""
@@ -73,11 +75,11 @@ class ModernSplashScreen(QWidget):
         self._draw_footer(painter)
     
     def _draw_background(self, painter):
-        # 主背景渐变
+        # 主背景渐变（随主题：浅色白→灰，深色深灰→更深）
         gradient = QLinearGradient(0, 0, self.width(), self.height())
-        gradient.setColorAt(0, QColor("#ffffff"))
-        gradient.setColorAt(0.5, QColor("#f8fafc"))
-        gradient.setColorAt(1, QColor("#f1f5f9"))
+        gradient.setColorAt(0, QColor(theme.t("card")))
+        gradient.setColorAt(0.5, QColor(theme.t("card_alt")))
+        gradient.setColorAt(1, QColor(theme.t("track")))
         
         painter.setPen(Qt.NoPen)
         painter.setBrush(gradient)
@@ -169,7 +171,7 @@ class ModernSplashScreen(QWidget):
         
         # 背景条
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(226, 232, 240))
+        painter.setBrush(QColor(theme.t('border')))
         painter.drawRoundedRect(bar_x, bar_y, bar_width, bar_height, 3, 3)
         
         # 进度条
@@ -215,7 +217,7 @@ class ModernSplashScreen(QWidget):
     
     def _draw_footer(self, painter):
         # 分隔线
-        painter.setPen(QPen(QColor(226, 232, 240), 1))
+        painter.setPen(QPen(QColor(theme.t('border')), 1))
         painter.drawLine(100, self.height() - 35, self.width() - 100, self.height() - 35)
         
         # 版本信息

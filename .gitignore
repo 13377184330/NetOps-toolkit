@@ -34,3 +34,6 @@ Thumbs.db
 
 # 临时启动脚本
 _open_tools_new.py
+
+# 平台记忆目录（TeleAgent 工作区产物）
+.workbuddy/

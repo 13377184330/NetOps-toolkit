@@ -81,7 +81,7 @@ class ManualToolWidget(QWidget):
         right_layout.addWidget(self.title_label)
         
         self.command_label = QLabel("")
-        self.command_label.setStyleSheet("font-size: 14px; color: #ffc107; font-family: Consolas;")
+        self.command_label.setStyleSheet("font-size: 14px; color: #FA9D3B; font-family: Consolas;")
         right_layout.addWidget(self.command_label)
         
         self.desc_label = QLabel("")

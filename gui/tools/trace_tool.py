@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QGroupBox,
                              QSpinBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMessageBox)
+                             QHeaderView)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 
@@ -22,6 +22,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR, TOOL_STATUS_WARNING,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class TraceWorker(QThread):
@@ -57,7 +58,7 @@ class TraceRouteWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🛤️ 路由跟踪工具")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         input_group = QGroupBox("追踪设置")
@@ -111,10 +112,12 @@ class TraceRouteWidget(QWidget):
         layout.addWidget(input_group)
         
         self.status_label = QLabel("等待追踪...")
-        self.status_label.setStyleSheet("color: #666666; padding: 8px; font-size: 12px;")
+        self.status_label.setStyleSheet("color: #5F6B7A; padding: 8px; font-size: 12px;")
         layout.addWidget(self.status_label)
         
         self.result_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.result_table)
         self.result_table.setColumnCount(5)
         self.result_table.setHorizontalHeaderLabels(["跳数", "IP 地址", "主机名", "平均延迟", "状态"])
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -140,7 +143,7 @@ class TraceRouteWidget(QWidget):
         host = self.host_input.text().strip()
         
         if not host:
-            QMessageBox.warning(self, "警告", "请输入目标主机")
+            warn_box(self, "警告", "请输入目标主机")
             return
         
         self.trace_btn.setEnabled(False)

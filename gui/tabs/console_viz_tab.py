@@ -9,13 +9,14 @@ Console 只读可视化标签页（二开新增）
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                               QGroupBox, QComboBox, QPushButton, QLabel,
                               QTreeWidget, QTreeWidgetItem, QTextEdit,
-                              QMessageBox, QProgressBar, QSpinBox, QSplitter,
+                              QProgressBar, QSpinBox, QSplitter,
                               QGridLayout)
 from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 
 import re
 
+from gui.dialogs.base import error_box, info_box, warn_box, question_box
 from modules import config_visualizer as cv
 from modules import console_reader as cr
 from modules.device_connector import VENDOR_LABELS
@@ -150,17 +151,22 @@ class ConsoleVizTab(QWidget):
         conn_form.setContentsMargins(16, 8, 16, 8)
 
         self.port_combo = QComboBox()
+        # 串口名 + 描述动辄 30+ 字符，按内容自适应宽度，否则"（未检测到串口）"会被截成
+        # "（未检测到串"（实测）。同时给一个不裁切的下限。
+        self.port_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.port_combo.setMinimumWidth(220)
         self.refresh_ports()
 
-        refresh_btn = QPushButton("↻ 刷新串口")
+        refresh_btn = QPushButton("刷新串口")
         refresh_btn.setObjectName("secondaryButton")
+        refresh_btn.setToolTip("重新扫描本机串口（插拔 Console 线后点这里）")
         refresh_btn.clicked.connect(self.refresh_ports)
 
         self.baud_spin = QSpinBox()
         self.baud_spin.setRange(1200, 115200)
         self.baud_spin.setValue(9600)
 
-        self.connect_btn = QPushButton("🔌 连接并读取配置")
+        self.connect_btn = QPushButton("连接并读取配置")
         self.connect_btn.setObjectName("primaryButton")
         self.connect_btn.clicked.connect(self.start_read)
 
@@ -324,7 +330,8 @@ class ConsoleVizTab(QWidget):
             for p, desc in ports:
                 self.port_combo.addItem(f"{p} — {desc}", p)
         else:
-            self.port_combo.addItem("（未检测到串口）", "")
+            self.port_combo.addItem("未检测到串口", "")
+            self.port_combo.setToolTip("插入 Console 线（USB 转串口）后点右侧「刷新串口」")
 
     def log(self, text):
         self.log_view.append(text)
@@ -332,8 +339,8 @@ class ConsoleVizTab(QWidget):
     def start_read(self):
         port = self.port_combo.currentData()
         if not port:
-            QMessageBox.warning(self, "提示", "未检测到串口：请插入 Console 线后点「刷新串口」\n"
-                                "（首次使用需安装 USB 转串口驱动，如 FTDI/CH340）")
+            warn_box(self, "提示", "未检测到串口：请插入 Console 线后点「刷新串口」\n"
+                     "（首次使用需安装 USB 转串口驱动，如 FTDI/CH340）")
             return
         self.connect_btn.setEnabled(False)
         self.progress.setVisible(True)
@@ -393,13 +400,15 @@ class ConsoleVizTab(QWidget):
             except Exception:
                 pass
             self.health_list.clear()
-            level_color = {"严重": "#FA5151", "警告": "#FA9D3B", "提示": "#7A8699", "通过": "#34C759"}
+            from gui import theme as _theme
+            level_color = {"严重": _theme.t("danger"), "警告": _theme.t("warning"),
+                           "提示": _theme.t("text_muted"), "通过": _theme.t("success")}
             order = {"严重": 0, "警告": 1, "提示": 2, "通过": 3}
             for it in sorted(res["items"], key=lambda x: order.get(x["level"], 9)):
                 if it["level"] == "通过":
                     continue
                 node = QTreeWidgetItem([f"{it['domain']} · {it['item']}", it["level"]])
-                node.setForeground(1, QBrush(QColor(level_color.get(it["level"], "#7A8699"))))
+                node.setForeground(1, QBrush(QColor(level_color.get(it["level"], _theme.t("text_muted")))))
                 node.setToolTip(0, it["advice"] or it["baseline"])
                 self.health_list.addTopLevelItem(node)
             if self.health_list.topLevelItemCount() == 0:
@@ -413,8 +422,8 @@ class ConsoleVizTab(QWidget):
         人只补 SSH 凭据（内网场景：能读到的信息不该让人手工抄一遍）"""
         res = self._last_result
         if not res:
-            QMessageBox.information(self, "存入设备清单",
-                                    "还没有采集数据。\n\n请先点「连接并读取配置」。")
+            info_box(self, "存入设备清单",
+                     "还没有采集数据。\n\n请先点「连接并读取配置」。")
             return
         main = self.window()
         ops = getattr(main, "tabs", {}).get("device_ops") if main else None
@@ -440,7 +449,7 @@ class ConsoleVizTab(QWidget):
                "notes": "Console 采集导入"}
         if any(d.get("name") == pre["name"] and d.get("ip") == pre["ip"]
                for d in ops.store.list_all()):
-            QMessageBox.information(
+            info_box(
                 self, "存入设备清单",
                 f"设备 {pre['name']}（{pre['ip'] or '无管理 IP'}）已在清单中，未重复登记。")
             return
@@ -449,7 +458,7 @@ class ConsoleVizTab(QWidget):
             return
         data = dlg.data()
         if not data["name"] or not data["ip"]:
-            QMessageBox.warning(
+            warn_box(
                 self, "提示",
                 "设备名称和管理 IP 必填（管理 IP 自动取自配置里的 Vlan-interface 地址，"
                 "若设备没有三层地址请手工填写可达的 SSH 地址）")
@@ -457,7 +466,7 @@ class ConsoleVizTab(QWidget):
         ops.store.add(data)
         ops.refresh_table()
         self.log(f"[设备] 已从采集导入设备清单：{data['name']} ({data['ip']})")
-        QMessageBox.information(
+        info_box(
             self, "存入设备清单",
             f"已登记：{data['name']}（{data['ip']}）\n"
             "可在「设备运维」页直接做 SSH 测试 / 命令执行 / 下发 / 备份。")
@@ -574,7 +583,7 @@ class ConsoleVizTab(QWidget):
     # ---------------- 保存 ----------------
     def save_config(self):
         if not self._raw_config:
-            QMessageBox.information(self, "提示", "还没有抓取到配置，请先连接读取")
+            info_box(self, "提示", "还没有抓取到配置，请先连接读取")
             return
         from PyQt5.QtWidgets import QFileDialog
         default_name = f"console_{self._last_result.get('vendor', 'device')}_running.cfg"
@@ -583,35 +592,35 @@ class ConsoleVizTab(QWidget):
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(self._raw_config)
-            QMessageBox.information(self, "成功", f"配置已保存到：\n{path}")
+            info_box(self, "成功", f"配置已保存到：\n{path}")
 
     # ---------------- 配置下发（闭环） ----------------
     def deploy_to_device(self):
         """把编辑后的配置下发回当前 Console 交换机（双重确认 + 自动备份原文）"""
         port = self.port_combo.currentData()
         if not port:
-            QMessageBox.warning(self, "提示", "未检测到串口，请先连接 Console")
+            warn_box(self, "提示", "未检测到串口，请先连接 Console")
             return
         text = self.raw_view.toPlainText().strip()
         if not text:
-            QMessageBox.warning(self, "提示", "配置内容为空")
+            warn_box(self, "提示", "配置内容为空")
             return
 
         lines = [l.rstrip() for l in text.splitlines()
                  if l.strip() and not l.strip().startswith("#")
                  and not l.strip().startswith("<")]  # 去掉提示符残留行
         if not lines:
-            QMessageBox.warning(self, "提示", "没有可下发的配置命令行")
+            warn_box(self, "提示", "没有可下发的配置命令行")
             return
 
         preview = "\n".join(lines[:8]) + ("\n…" if len(lines) > 8 else "")
-        ret = QMessageBox.question(
-            self, "确认下发配置",
-            f"即将向 Console 交换机（{port}）下发 {len(lines)} 条配置命令：\n\n{preview}\n\n"
-            "下发会立即改变设备运行配置（不自动存盘）。\n"
-            "建议先「保存配置文件」备份当前配置。继续？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if ret != QMessageBox.Yes:
+        # 危险确认：回车默认落在「否」（安全保护，与原生 QMessageBox(No) 行为一致）
+        if not question_box(
+                self, "确认下发配置",
+                f"即将向 Console 交换机（{port}）下发 {len(lines)} 条配置命令：\n\n{preview}\n\n"
+                "下发会立即改变设备运行配置（不自动存盘）。\n"
+                "建议先「保存配置文件」备份当前配置。继续？",
+                ok="是", cancel="否", default="cancel"):
             return
 
         self.deploy_btn_c.setEnabled(False)
@@ -629,9 +638,9 @@ class ConsoleVizTab(QWidget):
         self.progress.setVisible(False)
         self.progress_label.setVisible(False)
         if ok:
-            QMessageBox.information(self, "下发完成", msg)
+            info_box(self, "下发完成", msg)
             # 下发后自动重新采集，展示设备最新配置
             if self.port_combo.currentData():
                 self.start_read()
         else:
-            QMessageBox.critical(self, "下发失败", msg)
+            error_box(self, "下发失败", msg)

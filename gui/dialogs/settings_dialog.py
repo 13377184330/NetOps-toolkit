@@ -7,14 +7,15 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QComboBox, QSpinBox,
                              QCheckBox, QTabWidget, QWidget, QLineEdit,
-                             QListWidget, QMessageBox)
+                             QListWidget, QApplication)
 from PyQt5.QtCore import Qt
 
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from gui.styles import MODERN_STYLE, DIALOG_STYLE
+from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from gui.dialogs.base import info_box, question_box
 from utils.settings import Settings
 
 
@@ -29,7 +30,7 @@ class SettingsDialog(QDialog):
     def initUI(self):
         self.setWindowTitle("系统设置")
         self.setMinimumSize(500, 450)
-        self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
@@ -49,6 +50,7 @@ class SettingsDialog(QDialog):
         theme_row.addWidget(theme_label)
         
         self.theme_combo = QComboBox()
+        # 浅色 / 深色 / 跟随系统（保存的是偏好；system 在启动时归一化为实际主题）
         self.theme_combo.addItems(["浅色模式", "深色模式", "跟随系统"])
         current_theme = self.settings.get('theme', 'light')
         theme_index = {'light': 0, 'dark': 1, 'system': 2}.get(current_theme, 0)
@@ -56,6 +58,10 @@ class SettingsDialog(QDialog):
         theme_row.addWidget(self.theme_combo)
         theme_row.addStretch()
         theme_layout.addLayout(theme_row)
+
+        theme_hint = QLabel("保存后立即生效；「跟随系统」取 Windows 的应用亮/暗模式")
+        theme_hint.setStyleSheet("color: #5F6B7A; font-size: 12px;")
+        theme_layout.addWidget(theme_hint)
         
         toolbar_row = QHBoxLayout()
         self.show_toolbar_cb = QCheckBox("显示工具栏")
@@ -75,24 +81,32 @@ class SettingsDialog(QDialog):
         device_row.addWidget(device_label)
         
         self.device_combo = QComboBox()
-        self.device_combo.addItems(["华为 (Huawei)", "H3C (华三)"])
+        # 与标题栏的五厂商下拉保持一致（原来只有华为/H3C 两项）
+        self._device_values = ["huawei", "h3c", "ruijie", "maipu", "cisco"]
+        self.device_combo.addItems(["华为 (Huawei)", "H3C (华三)", "锐捷 (Ruijie)",
+                                    "迈普 (Maipu)", "思科 (Cisco)"])
         current_device = self.settings.get('default_device', 'huawei')
-        self.device_combo.setCurrentIndex(0 if current_device == 'huawei' else 1)
+        self.device_combo.setCurrentIndex(
+            self._device_values.index(current_device)
+            if current_device in self._device_values else 0)
         device_row.addWidget(self.device_combo)
         device_row.addStretch()
         device_layout.addLayout(device_row)
         
         general_layout.addWidget(device_group)
         
+        behavior_group = QGroupBox("行为")
+        behavior_layout = QVBoxLayout(behavior_group)
         auto_save_row = QHBoxLayout()
         self.auto_save_cb = QCheckBox("自动保存配置")
         self.auto_save_cb.setChecked(self.settings.get('auto_save', True))
         auto_save_row.addWidget(self.auto_save_cb)
         auto_save_row.addStretch()
-        general_layout.addLayout(auto_save_row)
+        behavior_layout.addLayout(auto_save_row)
+        general_layout.addWidget(behavior_group)
         
         general_layout.addStretch()
-        tabs.addTab(general_widget, "⚙️ 常规")
+        tabs.addTab(general_widget, "常规")
         
         network_widget = QWidget()
         network_layout = QVBoxLayout(network_widget)
@@ -140,7 +154,7 @@ class SettingsDialog(QDialog):
         network_layout.addWidget(timeout_group)
         network_layout.addStretch()
         
-        tabs.addTab(network_widget, "🌐 网络")
+        tabs.addTab(network_widget, "网络")
         
         history_widget = QWidget()
         history_layout = QVBoxLayout(history_widget)
@@ -160,7 +174,7 @@ class SettingsDialog(QDialog):
         history_layout.addWidget(recent_group)
         history_layout.addStretch()
         
-        tabs.addTab(history_widget, "📋 历史")
+        tabs.addTab(history_widget, "历史")
         
         layout.addWidget(tabs)
         
@@ -186,29 +200,39 @@ class SettingsDialog(QDialog):
     
     def save_settings(self):
         theme_map = {0: 'light', 1: 'dark', 2: 'system'}
-        self.settings.set('theme', theme_map[self.theme_combo.currentIndex()])
+        new_pref = theme_map[self.theme_combo.currentIndex()]
+        self.settings.set('theme', new_pref)
+        # 主题即时生效（不用重启）：偏好 system 时归一化为当前系统主题
+        try:
+            from gui import theme as _theme
+            actual = _theme.system_theme() if new_pref == 'system' else new_pref
+            _theme.set_theme(actual, QApplication.instance())
+        except Exception:
+            pass
         self.settings.set('show_toolbar', self.show_toolbar_cb.isChecked())
-        self.settings.set('default_device', 'huawei' if self.device_combo.currentIndex() == 0 else 'h3c')
+        self.settings.set('default_device', self._device_values[self.device_combo.currentIndex()])
         self.settings.set('auto_save', self.auto_save_cb.isChecked())
         self.settings.set('default_ping_count', self.ping_count_spin.value())
         self.settings.set('default_timeout', self.timeout_spin.value())
         self.settings.set('default_port_timeout', self.port_timeout_spin.value())
         
-        QMessageBox.information(self, "成功", "设置已保存，部分设置需要重启生效")
+        info_box(self, "成功", "设置已保存，部分设置需要重启生效")
         self.accept()
     
     def reset_settings(self):
-        reply = QMessageBox.question(self, "确认", "确定恢复默认设置？", 
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        if question_box(self, "确认", "确定恢复默认设置？", ok="是", cancel="否"):
             self.settings.reset()
-            QMessageBox.information(self, "成功", "已恢复默认设置")
+            # 恢复默认 = 浅色主题，同步把界面也切回去
+            try:
+                from gui import theme as _theme
+                _theme.set_theme('light', QApplication.instance())
+            except Exception:
+                pass
+            info_box(self, "成功", "已恢复默认设置")
             self.reject()
     
     def clear_recent_hosts(self):
-        reply = QMessageBox.question(self, "确认", "确定清空最近主机历史？",
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        if question_box(self, "确认", "确定清空最近主机历史？", ok="是", cancel="否"):
             self.settings.set('recent_hosts', [])
             self.recent_list.clear()
-            QMessageBox.information(self, "成功", "历史已清空")
+            info_box(self, "成功", "历史已清空")

@@ -42,7 +42,7 @@ class EncoderToolWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🔄 编码转换器")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         tabs = QTabWidget()
@@ -289,7 +289,7 @@ class EncoderToolWidget(QWidget):
         layout.addWidget(tabs)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def base64_encode(self):

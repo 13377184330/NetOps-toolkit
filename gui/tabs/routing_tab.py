@@ -6,8 +6,9 @@ NetOps Toolkit - 路由配置标签页
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QLineEdit, QSpinBox, QCheckBox, QGroupBox,
-                             QComboBox, QPushButton, QListWidget, QMessageBox, QLabel)
+                             QComboBox, QPushButton, QListWidget, QLabel)
 from PyQt5.QtCore import Qt
+from gui.dialogs.base import warn_box
 from modules.routing_config import RoutingConfigGenerator
 
 
@@ -202,7 +203,7 @@ class RoutingConfigTab(QWidget):
         nexthop = self.route_nexthop.text().strip()
         
         if not dest or not mask or not nexthop:
-            QMessageBox.warning(self, "警告", "请填写完整的路由信息！")
+            warn_box(self, "警告", "请填写完整的路由信息！")
             return
         
         route_data = {
@@ -225,7 +226,7 @@ class RoutingConfigTab(QWidget):
     def add_default_route(self):
         nexthop = self.route_nexthop.text().strip()
         if not nexthop:
-            QMessageBox.warning(self, "警告", "请输入下一跳地址！")
+            warn_box(self, "警告", "请输入下一跳地址！")
             return
         
         route_data = {
@@ -254,7 +255,7 @@ class RoutingConfigTab(QWidget):
         wildcard = self.ospf_wildcard.text().strip()
         
         if not network:
-            QMessageBox.warning(self, "警告", "请输入网络地址！")
+            warn_box(self, "警告", "请输入网络地址！")
             return
         
         self.ospf_networks.append({
@@ -279,7 +280,7 @@ class RoutingConfigTab(QWidget):
         peer_as = self.bgp_peer_as.value()
         
         if not peer_ip:
-            QMessageBox.warning(self, "警告", "请输入对等体IP！")
+            warn_box(self, "警告", "请输入对等体IP！")
             return
         
         self.bgp_peers.append({
@@ -299,7 +300,7 @@ class RoutingConfigTab(QWidget):
     def add_bgp_network(self):
         network = self.bgp_network_input.text().strip()
         if not network:
-            QMessageBox.warning(self, "警告", "请输入网络地址！")
+            warn_box(self, "警告", "请输入网络地址！")
             return
         
         self.bgp_networks.append(network)

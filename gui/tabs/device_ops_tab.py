@@ -10,11 +10,12 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QTextEdit, QLineEdit,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QDialog, QDialogButtonBox,
-                             QSpinBox, QMessageBox, QSplitter, QInputDialog)
+                              QSpinBox, QSplitter, QInputDialog)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 from utils.device_store import DeviceStore
 from utils.credential_crypto import decrypt
+from gui.dialogs.base import info_box, question_box, warn_box
 from modules import device_connector as dc
 from modules.device_connector import VENDOR_LABELS
 
@@ -152,18 +153,21 @@ class DeviceOpsTab(QWidget):
         self.table.setHorizontalHeaderLabels(["ID", "名称", "管理IP", "端口", "厂商", "型号", "备注"])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
-        header.resizeSection(0, 40)
-        header.resizeSection(1, 120)
-        header.resizeSection(2, 110)
-        header.resizeSection(3, 46)
-        header.resizeSection(4, 56)
-        # 型号/备注列自动伸缩填满，避免固定总宽超出视口
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
+        header.resizeSection(0, 44)
+        header.resizeSection(1, 130)
+        header.resizeSection(2, 120)
+        header.resizeSection(3, 56)
+        header.resizeSection(4, 64)
+        header.resizeSection(5, 150)
+        # 只有「备注」吃剩余宽度：原来型号/备注两列都 Stretch，设备一少
+        # 这两列就平分掉大半屏（截图实测"型号"列宽得离谱）
         header.setSectionResizeMode(6, QHeaderView.Stretch)
         self.table.setMinimumHeight(150)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.verticalHeader().setDefaultSectionSize(38)   # 行高充足、内容好读
+        from gui.widget_utils import polish_table
+        polish_table(self.table, sortable=True, stretch_last=False)
         top_layout.addWidget(self.table)
 
         # 按钮行：两排小按钮（窄视口友好），按钮紧凑化
@@ -175,7 +179,7 @@ class DeviceOpsTab(QWidget):
         self.test_btn = QPushButton("测试连通（SSH 登录）")
         self.probe_btn = QPushButton("批量探测（TCP）")
         for b in (self.add_btn, self.edit_btn, self.del_btn, self.test_btn, self.probe_btn):
-            b.setStyleSheet("padding: 8px 14px;")
+            b.setStyleSheet("padding: 11px 16px;")
         for b in (self.add_btn, self.edit_btn, self.del_btn):
             btn_row.addWidget(b)
         btn_row.addStretch()
@@ -204,7 +208,7 @@ class DeviceOpsTab(QWidget):
         self.cmd_input.setPlaceholderText("输入回显命令，如 display version / show ip interface brief")
         self.cmd_input.setMinimumWidth(180)
         self.cmd_btn = QPushButton("执行命令")
-        self.cmd_btn.setStyleSheet("padding: 8px 14px;")
+        self.cmd_btn.setStyleSheet("padding: 11px 16px;")
         cmd_row.addWidget(self.cmd_input, 4)
         cmd_row.addWidget(self.cmd_btn, 0)
         ops_layout.addLayout(cmd_row)
@@ -215,7 +219,7 @@ class DeviceOpsTab(QWidget):
         self.deploy_btn = QPushButton("下发配置到选中设备")
         self.backup_btn = QPushButton("备份选中设备配置")
         for b in (self.deploy_btn, self.backup_btn):
-            b.setStyleSheet("padding: 8px 14px;")
+            b.setStyleSheet("padding: 11px 16px;")
         deploy_row.addWidget(self.deploy_btn)
         deploy_row.addWidget(self.backup_btn)
         deploy_row.addStretch()
@@ -264,12 +268,12 @@ class DeviceOpsTab(QWidget):
     def _selected_device(self):
         row = self.table.currentRow()
         if row < 0:
-            QMessageBox.warning(self, "提示", "请先在表格中选中一台设备")
+            warn_box(self, "提示", "请先在表格中选中一台设备")
             return None
         device_id = int(self.table.item(row, 0).text())
         device = self.store.get(device_id)
         if not device:
-            QMessageBox.warning(self, "提示", "设备不存在（可能已被删除）")
+            warn_box(self, "提示", "设备不存在（可能已被删除）")
             return None
         return device
 
@@ -293,23 +297,30 @@ class DeviceOpsTab(QWidget):
     # ---------------- 设备管理 ----------------
     def refresh_table(self):
         devices = self.store.list_all()
+        # 填表期间关排序：开着排序边填边跳行，最终顺序还不确定
+        self.table.setSortingEnabled(False)
         self.table.setRowCount(len(devices))
         for r, d in enumerate(devices):
-            vals = [str(d["id"]), d["name"], d["ip"], str(d.get("ssh_port", 22)),
+            vals = [d["id"], d["name"], d["ip"], d.get("ssh_port", 22),
                     VENDOR_LABELS.get(d.get("vendor"), d.get("vendor", "")),
                     d.get("model", ""), d.get("notes", "")]
             for c, v in enumerate(vals):
-                item = QTableWidgetItem(v)
                 if c in (0, 3):
+                    # ID / 端口用整型数据：排序按数值（否则 "10" 排在 "2" 前面）
+                    item = QTableWidgetItem()
+                    item.setData(Qt.DisplayRole, int(v))
                     item.setTextAlignment(Qt.AlignCenter)
+                else:
+                    item = QTableWidgetItem(str(v))
                 self.table.setItem(r, c, item)
+        self.table.setSortingEnabled(True)
 
     def add_device(self):
         dlg = DeviceDialog(parent=self)
         if dlg.exec_():
             data = dlg.data()
             if not data["name"] or not data["ip"]:
-                QMessageBox.warning(self, "提示", "设备名称和管理 IP 必填")
+                warn_box(self, "提示", "设备名称和管理 IP 必填")
                 return
             self.store.add(data)
             self.refresh_table()
@@ -323,7 +334,7 @@ class DeviceOpsTab(QWidget):
         if dlg.exec_():
             data = dlg.data()
             if not data["name"] or not data["ip"]:
-                QMessageBox.warning(self, "提示", "设备名称和管理 IP 必填")
+                warn_box(self, "提示", "设备名称和管理 IP 必填")
                 return
             self.store.update(device["id"], data)
             self.refresh_table()
@@ -334,10 +345,10 @@ class DeviceOpsTab(QWidget):
         device = self._selected_device()
         if not device:
             return
-        ret = QMessageBox.question(self, "删除确认",
-                                   f"确定删除设备「{device['name']}」({device['ip']})？",
-                                   QMessageBox.Yes | QMessageBox.No)
-        if ret == QMessageBox.Yes:
+        ret = question_box(self, "删除确认",
+                           f"确定删除设备「{device['name']}」({device['ip']})？",
+                           ok="是", cancel="否")
+        if ret:
             self.store.delete(device["id"])
             self.refresh_table()
             self.log(f"[设备] 已删除：{device['name']} ({device['ip']})")
@@ -348,7 +359,7 @@ class DeviceOpsTab(QWidget):
         if not device:
             return
         if not self._password_of(device):
-            QMessageBox.warning(self, "提示", "该设备未保存密码，无法做 SSH 登录测试")
+            warn_box(self, "提示", "该设备未保存密码，无法做 SSH 登录测试")
             return
 
         def job(log):
@@ -361,7 +372,7 @@ class DeviceOpsTab(QWidget):
     def probe_all(self):
         devices = self.store.list_all()
         if not devices:
-            QMessageBox.information(self, "提示", "设备清单为空，请先新增设备")
+            info_box(self, "提示", "设备清单为空，请先新增设备")
             return
 
         def job(log):
@@ -386,7 +397,7 @@ class DeviceOpsTab(QWidget):
             return
         command = self.cmd_input.text().strip()
         if not command:
-            QMessageBox.warning(self, "提示", "请输入要执行的命令")
+            warn_box(self, "提示", "请输入要执行的命令")
             return
 
         def job(log):
@@ -402,13 +413,13 @@ class DeviceOpsTab(QWidget):
             return
         config_text = self.deploy_input.toPlainText().strip()
         if not config_text:
-            QMessageBox.warning(self, "提示", "请粘贴要下发的配置命令")
+            warn_box(self, "提示", "请粘贴要下发的配置命令")
             return
-        ret = QMessageBox.question(
+        ret = question_box(
             self, "下发确认",
             f"即将向「{device['name']}」({device['ip']}) 下发 {len([l for l in config_text.splitlines() if l.strip() and not l.strip().startswith('#')])} 条配置命令。\n\n请确认已在测试环境验证，继续？",
-            QMessageBox.Yes | QMessageBox.No)
-        if ret != QMessageBox.Yes:
+            ok="是", cancel="否")
+        if not ret:
             return
 
         def job(log):

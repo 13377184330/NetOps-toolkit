@@ -43,14 +43,17 @@ def parse_basic(text: str) -> dict:
 _IFACE_RE = re.compile(r"^interface\s+(\S+)", re.M)
 
 # 接口类型识别（用于图标/分组）
+# 注意：缩写后必须紧跟数字（(?=\d)），不能用 \b —— 全名 Ten-GigabitEthernet1/0/49
+# 在 t 与 1 之间没有词边界，用 \b 会把 10GE 光口误判成「其他」（真机 S5552S-EI 4 个 XGE 全中招）
 _IFACE_KIND = [
-    (re.compile(r"^(GigabitEthernet|GE|Gi|Ethernet|Eth|E)", re.I), "GE 电口"),
-    (re.compile(r"^(Ten-GigabitEthernet|XG|TenGig|Te)\b", re.I), "10GE 光口"),
-    (re.compile(r"^(Forty|FGE)", re.I), "40GE"),
-    (re.compile(r"^(Hundred|HGE)", re.I), "100GE"),
+    (re.compile(r"^(GigabitEthernet|M-GigabitEthernet|GE|Gi|Ethernet|Eth|E)(?=\d)", re.I), "GE 电口"),
+    (re.compile(r"^(Ten-GigabitEthernet|TenGigE|TenGig|XGE|XG|Te)(?=\d)", re.I), "10GE 光口"),
+    (re.compile(r"^(FortyGigE|Forty|FGE)(?=\d)", re.I), "40GE"),
+    (re.compile(r"^(HundredGigE|Hundred|HGE)(?=\d)", re.I), "100GE"),
+    (re.compile(r"^(Bridge-Aggregation|Port-channel|Po)(?=\d)", re.I), "聚合口"),
     (re.compile(r"^(Vlan-interface|Vlanif|Vl)", re.I), "VLAN 接口"),
     (re.compile(r"^NULL", re.I), "NULL"),
-    (re.compile(r"^(Loopback|Lo)", re.I), "Loopback"),
+    (re.compile(r"^(Loopback|Lo)(?=\d)", re.I), "Loopback"),
 ]
 
 

@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QGroupBox,
                              QSpinBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMessageBox, QCheckBox, QFrame)
+                             QHeaderView, QCheckBox, QFrame)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 
@@ -23,6 +23,7 @@ from gui.tool_styles import (
     RESULT_HEADER, RESULT_FOOTER,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class PingWorker(QThread):
@@ -71,7 +72,7 @@ class PingTestWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🔔 Ping 网络连通性测试")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         single_group = QGroupBox("单主机 Ping 测试")
@@ -156,6 +157,8 @@ class PingTestWidget(QWidget):
         batch_layout.addLayout(batch_row)
         
         self.batch_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.batch_table)
         self.batch_table.setColumnCount(6)
         self.batch_table.setHorizontalHeaderLabels(["主机", "状态", "发送", "接收", "丢失率", "平均延迟"])
         self.batch_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -165,14 +168,14 @@ class PingTestWidget(QWidget):
         layout.addWidget(batch_group)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def start_ping(self):
         host = self.host_input.text().strip()
         
         if not host:
-            QMessageBox.warning(self, "警告", "请输入目标主机")
+            warn_box(self, "警告", "请输入目标主机")
             return
         
         self.ping_btn.setEnabled(False)
@@ -190,13 +193,13 @@ class PingTestWidget(QWidget):
         hosts_text = self.batch_input.text().strip()
         
         if not hosts_text:
-            QMessageBox.warning(self, "警告", "请输入主机列表")
+            warn_box(self, "警告", "请输入主机列表")
             return
         
         hosts = [h.strip() for h in hosts_text.split(',') if h.strip()]
         
         if not hosts:
-            QMessageBox.warning(self, "警告", "请输入有效的主机列表")
+            warn_box(self, "警告", "请输入有效的主机列表")
             return
         
         self.batch_btn.setEnabled(False)

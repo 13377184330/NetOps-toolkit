@@ -181,7 +181,7 @@ class HTTPStatusWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🌐 HTTP状态检测")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         tabs = QTabWidget()
@@ -279,6 +279,8 @@ class HTTPStatusWidget(QWidget):
         batch_layout.addWidget(batch_group)
         
         self.batch_result_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.batch_result_table)
         self.batch_result_table.setColumnCount(4)
         self.batch_result_table.setHorizontalHeaderLabels(["URL", "状态码", "响应时间", "状态"])
         self.batch_result_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -290,7 +292,7 @@ class HTTPStatusWidget(QWidget):
         layout.addWidget(tabs)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def start_check(self):

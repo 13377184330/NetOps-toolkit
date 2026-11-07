@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QTextEdit, QComboBox, QSpinBox,
-                             QProgressBar, QMessageBox, QFileDialog, QWidget)
+                             QProgressBar, QFileDialog, QWidget)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -15,7 +15,8 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from gui.styles import MODERN_STYLE, DIALOG_STYLE
+from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from gui.dialogs.base import info_box, warn_box, error_box
 from modules.basic_config import BasicConfigGenerator
 
 
@@ -142,7 +143,7 @@ class BatchConfigDialog(QDialog):
     def initUI(self):
         self.setWindowTitle("批量配置生成")
         self.setMinimumSize(900, 600)
-        self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -180,6 +181,8 @@ class BatchConfigDialog(QDialog):
         layout.addWidget(settings_group)
         
         self.device_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.device_table)
         self.device_table.setColumnCount(5)
         self.device_table.setHorizontalHeaderLabels(["主机名", "管理IP", "掩码", "VLAN列表", "备注"])
         self.device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -189,7 +192,7 @@ class BatchConfigDialog(QDialog):
         layout.addWidget(self.device_table)
         
         tip_label = QLabel("💡 VLAN列表格式: 10:Sales,20:Engineering,30:HR (ID:名称)")
-        tip_label.setStyleSheet("color: #666666; font-size: 11px;")
+        tip_label.setStyleSheet("color: #5F6B7A; font-size: 11px;")
         layout.addWidget(tip_label)
         
         self.progress_bar = QProgressBar()
@@ -208,7 +211,7 @@ class BatchConfigDialog(QDialog):
         preview_header.addStretch()
         
         self.hostname_label = QLabel("")
-        self.hostname_label.setStyleSheet("color: #1976D2; font-weight: bold;")
+        self.hostname_label.setStyleSheet("color: #0089FF; font-weight: bold;")
         preview_header.addWidget(self.hostname_label)
         
         preview_layout.addLayout(preview_header)
@@ -299,7 +302,7 @@ class BatchConfigDialog(QDialog):
     def generate_configs(self):
         devices = self.get_devices()
         if not devices:
-            QMessageBox.warning(self, "提示", "请先添加设备")
+            warn_box(self, "提示", "请先添加设备")
             return
         
         self.worker = BatchGenerateWorker(devices)
@@ -314,7 +317,7 @@ class BatchConfigDialog(QDialog):
         self.results = results
         if results:
             self.show_preview(0)
-        QMessageBox.information(self, "完成", f"已生成 {len(results)} 个设备配置")
+        info_box(self, "完成", f"已生成 {len(results)} 个设备配置")
     
     def show_preview(self, index):
         if 0 <= index < len(self.results):
@@ -338,13 +341,13 @@ class BatchConfigDialog(QDialog):
                         self.device_table.setItem(r, 2, QTableWidgetItem(row.get('mask', '24')))
                         self.device_table.setItem(r, 3, QTableWidgetItem(row.get('vlans', '')))
                         self.device_table.setItem(r, 4, QTableWidgetItem(row.get('note', '')))
-                QMessageBox.information(self, "成功", f"已导入 {self.device_table.rowCount()} 个设备")
+                info_box(self, "成功", f"已导入 {self.device_table.rowCount()} 个设备")
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"导入失败: {str(e)}")
+                error_box(self, "错误", f"导入失败: {str(e)}")
     
     def export_all(self):
         if not self.results:
-            QMessageBox.warning(self, "提示", "请先生成配置")
+            warn_box(self, "提示", "请先生成配置")
             return
         
         dir_path = QFileDialog.getExistingDirectory(self, "选择导出目录")
@@ -355,4 +358,4 @@ class BatchConfigDialog(QDialog):
                 filepath = os.path.join(dir_path, filename)
                 with open(filepath, 'w', encoding='utf-8') as f:
                     f.write(result['config'])
-            QMessageBox.information(self, "成功", f"已导出 {len(self.results)} 个配置文件")
+            info_box(self, "成功", f"已导出 {len(self.results)} 个配置文件")

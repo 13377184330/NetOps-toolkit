@@ -7,8 +7,9 @@ NetOps Toolkit - 安全配置标签页
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QLineEdit, QSpinBox, QCheckBox, QGroupBox,
                              QComboBox, QPushButton, QListWidget, QTextEdit,
-                             QMessageBox, QRadioButton, QButtonGroup, QLabel)
+                             QRadioButton, QButtonGroup, QLabel)
 from PyQt5.QtCore import Qt
+from gui.dialogs.base import info_box, warn_box
 from modules.security_config import SecurityConfigGenerator
 
 
@@ -293,7 +294,7 @@ class SecurityConfigTab(QWidget):
     def apply_traffic_filter(self):
         interface = self.traffic_filter_interface.text().strip()
         if not interface:
-            QMessageBox.warning(self, "警告", "请输入接口名称！")
+            warn_box(self, "警告", "请输入接口名称！")
             return
         
         self.port_security_list.append({
@@ -301,7 +302,7 @@ class SecurityConfigTab(QWidget):
             "enable": False
         })
         
-        QMessageBox.information(self, "成功", f"ACL {self.traffic_filter_acl.value()} 已应用到接口 {interface}")
+        info_box(self, "成功", f"ACL {self.traffic_filter_acl.value()} 已应用到接口 {interface}")
     
     def get_config(self):
         config = {}

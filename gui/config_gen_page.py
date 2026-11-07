@@ -29,34 +29,57 @@ class ConfigGenPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        # 胶囊式二级导航
+        # 胶囊式二级导航（分段控件观感）
+        # 原来这里是一排"白底/选中蓝底"的按钮，和左侧一级导航的蓝底选中态一模一样，
+        # 两级看起来是同级的。改成浅灰轨道 + 白色选中块，一眼看出是"页内分段"。
+        from gui.styles import ACCENT, TEXT_SUB, TEXT
+
         nav_bar = QHBoxLayout()
-        nav_bar.setSpacing(8)
+        nav_bar.setSpacing(0)
         nav_bar.setContentsMargins(2, 2, 2, 0)
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._stack = QStackedWidget()
+
+        seg_bar = QWidget()
+        seg_bar.setObjectName("segBar")
+        seg_row = QHBoxLayout(seg_bar)
+        seg_row.setContentsMargins(3, 3, 3, 3)
+        seg_row.setSpacing(2)
+        seg_bar.setStyleSheet(f"""
+            #segBar {{
+                background: #E4EAF3;
+                border-radius: 12px;
+            }}
+            QPushButton {{
+                padding: 8px 18px;
+                border-radius: 9px;
+                border: none;
+                background: transparent;
+                color: {TEXT_SUB};
+                font-weight: bold;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                color: {TEXT};
+            }}
+            QPushButton:checked {{
+                background: #FFFFFF;
+                color: {ACCENT};
+            }}
+        """)
 
         titles = list(self._pages.keys())
         for i, title in enumerate(titles):
             btn = QPushButton(title)
             btn.setCheckable(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet("""
-                QPushButton {
-                    padding: 9px 22px; border-radius: 10px;
-                    border: 1px solid #E5EAF2; background: #FFFFFF;
-                    color: #5A6B7B; font-weight: bold; font-size: 13px;
-                }
-                QPushButton:hover { background: #E8EDF5; color: #1F2A37; }
-                QPushButton:checked {
-                    background: #0089FF; color: #FFFFFF; border: 1px solid #0089FF;
-                }
-            """)
             self._group.addButton(btn, i)
-            nav_bar.addWidget(btn)
+            seg_row.addWidget(btn)
             # 每个子页各自包滚动区（防止切页后横向需求变化导致外层裁切）
             self._stack.addWidget(scroll_wrap(self._pages[title]))
+
+        nav_bar.addWidget(seg_bar)
         nav_bar.addStretch()
         layout.addLayout(nav_bar)
 

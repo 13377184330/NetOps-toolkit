@@ -6,7 +6,7 @@
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QTextEdit, QPushButton, QSplitter, QComboBox,
-                             QGroupBox, QMessageBox, QTabWidget)
+                             QGroupBox, QTabWidget)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QTextCharFormat, QColor, QBrush
 import difflib
@@ -17,6 +17,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class ConfigCompareWidget(QWidget):
@@ -150,7 +151,7 @@ class ConfigCompareWidget(QWidget):
         right_text = self.right_text.toPlainText()
         
         if not left_text and not right_text:
-            QMessageBox.warning(self, "警告", "请输入配置内容")
+            warn_box(self, "警告", "请输入配置内容")
             return
         
         left_lines = left_text.splitlines()
@@ -182,7 +183,7 @@ class ConfigCompareWidget(QWidget):
         huawei_config = self.left_text.toPlainText()
         
         if not huawei_config:
-            QMessageBox.warning(self, "警告", "请输入华为配置")
+            warn_box(self, "警告", "请输入华为配置")
             return
         
         h3c_config = ConfigConverter.huawei_to_h3c(huawei_config)

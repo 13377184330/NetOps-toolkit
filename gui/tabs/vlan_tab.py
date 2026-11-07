@@ -7,8 +7,9 @@ NetOps Toolkit - VLAN配置标签页
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QLineEdit, QSpinBox, QCheckBox, QGroupBox,
                              QComboBox, QPushButton, QListWidget, QListWidgetItem,
-                             QTextEdit, QMessageBox, QLabel)
+                             QTextEdit, QLabel)
 from PyQt5.QtCore import Qt
+from gui.dialogs.base import info_box, warn_box
 from modules.vlan_config import VLANConfigGenerator
 
 
@@ -181,7 +182,7 @@ class VLANConfigTab(QWidget):
         
         for v in self.vlans:
             if v["id"] == vlan_id:
-                QMessageBox.warning(self, "警告", f"VLAN {vlan_id} 已存在！")
+                warn_box(self, "警告", f"VLAN {vlan_id} 已存在！")
                 return
         
         vlan_data = {"id": vlan_id}
@@ -215,7 +216,7 @@ class VLANConfigTab(QWidget):
         ports = [itf["name"] for itf in ifaces
                  if not str(itf["name"]).lower().startswith(skip)]
         if not ports:
-            QMessageBox.information(
+            info_box(
                 self, "从采集选择",
                 "还没有可用的采集数据。\n\n请先在「Console 可视化」页点「连接并读取配置」，"
                 "端口列表会自动带出。")
@@ -250,7 +251,7 @@ class VLANConfigTab(QWidget):
             self.add_interface()
             added += 1
         if added:
-            QMessageBox.information(
+            info_box(
                 self, "批量加入",
                 f"已按当前设置加入 {added} 个端口。\n（类型 / VLAN ID / Trunk VLANs 用的是表单当前值；"
                 "选中列表项可查看，误加可「删除选中」）")
@@ -258,7 +259,7 @@ class VLANConfigTab(QWidget):
     def add_interface(self):
         interface = self.interface_input.text().strip()
         if not interface:
-            QMessageBox.warning(self, "警告", "请输入接口名称！")
+            warn_box(self, "警告", "请输入接口名称！")
             return
         
         vlan_type = self.vlan_type_combo.currentText()
@@ -293,7 +294,7 @@ class VLANConfigTab(QWidget):
         ip_address = self.vlanif_ip.text().strip()
         
         if not ip_address:
-            QMessageBox.warning(self, "警告", "请输入IP地址！")
+            warn_box(self, "警告", "请输入IP地址！")
             return
         
         vlanif_data = {

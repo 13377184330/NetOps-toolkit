@@ -30,6 +30,7 @@ from gui.tools.convert_tool import ConvertWidget
 from gui.tools.batch_tool import BatchWidget
 from gui.tools.onboard_tool import OnboardWidget
 from gui.styles import MODERN_STYLE, BG
+from gui import theme
 from gui.title_bar import FramelessTitleBar
 
 
@@ -211,7 +212,7 @@ class NetworkToolsWindow(QMainWindow):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(BG))
+        painter.setBrush(theme.qcolor("bg"))
         radius = 12 if not self.isMaximized() else 0
         painter.drawRoundedRect(0, 0, self.width(), self.height(), radius, radius)
 

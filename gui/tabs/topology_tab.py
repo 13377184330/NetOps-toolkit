@@ -1,17 +1,20 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-网络拓扑可视化页（二开重构 v2：可交互的运维驾驶舱）
+网络拓扑可视化页（二开重构 v3：参数结合拓扑的运维驾驶舱）
 
 数据源（全部只读采集）：
   1) LLDP 邻居  —— 只能发现"开了 LLDP 的网管设备"（交换机/路由器）
   2) MAC 地址表 —— 发现接在端口上的终端（PC/打印机/摄像头），终端不应答 LLDP
   3) ARP 表     —— 给终端补 IP，便于 Ping / 定位
   4) 本机信息   —— 始终绘制「本机 PC」节点，并把 Console 线画成一条链路
+  5) 端口链路状态 + 接口解析 —— 交换机节点画成真实端口面板（v3 新增）
 
 交互：
-  - 单击选中、拖动移动、滚轮缩放、空白处拖动平移
-  - 双击 / 右键 → 设备面板：端口配置 / 查看配置 / 健康度 / 端口表 / Ping / 备份 / 复制
+  - 单击选中 → 右侧详情面板联动（非模态，参数直接可见）
+  - 双击 / 右键 → 设备面板：端口配置 / 查看配置 / 健康度 / 端口表 / Ping / 备份
+  - 点击端口面板上的端口格 → 直接打开该口配置生成器（预选）
+  - hover 端口格 → 端口名/状态/VLAN/描述（不打开任何窗口）
   - 「一键采集」：不离开本页直接发起 Console 采集
 Qt 原生图形框架实现，不重复造绘图轮子
 """
@@ -23,29 +26,36 @@ from PyQt5.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
                           QPainterPath, QPen, QMouseEvent)
 from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox,
-                              QDialog, QDialogButtonBox, QFormLayout,
+                              QDialog, QFormLayout,
                               QGraphicsItem, QGraphicsObject, QGraphicsScene,
                               QGraphicsTextItem, QGraphicsView, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QListWidget,
-                              QListWidgetItem, QMenu, QMessageBox,
-                              QPushButton, QSpinBox, QTableWidget,
-                              QTableWidgetItem, QTextEdit,
+                              QListWidgetItem, QMenu,
+                              QPushButton, QScrollArea, QSpinBox, QSplitter,
+                              QTableWidget, QTableWidgetItem, QTextEdit,
                               QVBoxLayout, QWidget, QHeaderView)
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from gui.dialogs.base import (BaseDialog, make_button, info_box, warn_box,
+                              question_box)
+from gui import theme
 from modules.config_visualizer import expand_vlan_body
 from modules.nl_engine import e_port_access, e_port_trunk
 
 # ---------------------------------------------------------------- 视觉规范
-KIND_STYLE = {
-    #          填充        描边        主文字     副文字
-    "switch":      ("#0089FF", "#0072D6", "#FFFFFF", "#D9ECFF"),
-    "placeholder": ("#F7F9FC", "#C9D4E3", "#7A8699", "#9AA7B8"),
-    "neighbor":    ("#FFFFFF", "#0089FF", "#1F2A37", "#7A8699"),
-    "pc":          ("#34C759", "#2BA84E", "#FFFFFF", "#DDF6E4"),
-    "host":        ("#FFFFFF", "#8E9AAF", "#1F2A37", "#7A8699"),
-    "unknown":     ("#F7F9FC", "#C9D4E3", "#5A6B82", "#9AA7B8"),
-}
+def KIND_STYLE():
+    """节点配色：画的时候现取主题（切主题后 scene.update() 即全量生效）"""
+    from gui import theme
+    t = theme.t
+    return {
+        #          填充             描边              主文字      副文字
+        "switch":      (t("accent"), t("accent_pressed"), "#FFFFFF", t("accent_light")),
+        "placeholder": (t("card_alt"), t("border_strong"), t("text_muted"), t("text_muted")),
+        "neighbor":    (t("card"), t("accent"), t("text"), t("text_muted")),
+        "pc":          (t("success"), t("success_hover"), "#FFFFFF", t("success")),
+        "host":        (t("card"), t("border_strong"), t("text"), t("text_muted")),
+        "unknown":     (t("card_alt"), t("border_strong"), t("text_sub"), t("text_muted")),
+    }
 NODE_ICON_W, NODE_ICON_H = 88, 58
 
 
@@ -80,21 +90,91 @@ def _usable_ip(v: str) -> str:
     return "" if v in ("", "未获取", "—", "-") else v
 
 
+# ---------------------------------------------------------------- 端口面板几何
+# 交换机节点按真实端口排布画端口格：
+#   - 电口（GE）与光口（XGE/FGE）分组，光口用浅蓝底区分
+#   - 每格一盏状态灯：绿=UP / 灰=DOWN / 蓝=Trunk / 红边=手工 shutdown / 空心=无数据
+#   - 格内标端口序号，hover 显全名，点击直接进端口配置
+PORT_CELL_W, PORT_CELL_H, PORT_CELL_GAP = 17, 20, 3
+PORT_GROUP_PAD = 8          # 分组内边距
+PORT_PER_ROW_MAX = 14       # 电口每行最多格数（>28 口时换行）
+
+
+def _port_label(name: str) -> str:
+    """端口格内序号：取名字里最后一段数字（GE1/0/12 → 12；XGE1/0/25 → 25）"""
+    nums = re.findall(r"\d+", name or "")
+    return nums[-1] if nums else "?"
+
+
+def _port_state(itf: dict, link_up: dict) -> str:
+    """端口状态：up/down/trunk/shutdown/unknown（采集读不到链路时 unknown）"""
+    detail = itf.get("detail") or {}
+    if detail.get("状态") == "administratively down":
+        return "shutdown"
+    vlan = str(detail.get("VLAN", ""))
+    if vlan.startswith("trunk"):
+        return "trunk"
+    key = _norm_port(itf["name"])
+    for k, up in (link_up or {}).items():
+        if _norm_port(k) == key:
+            return "up" if up else "down"
+    return "unknown"
+
+
+def _port_tip(itf: dict, state: str) -> str:
+    d = itf.get("detail") or {}
+    state_txt = {"up": "链路 UP", "down": "链路 DOWN", "trunk": "Trunk 干道",
+                 "shutdown": "已手工关闭(shutdown)", "unknown": "链路状态未知"}[state]
+    bits = [itf["name"], state_txt]
+    if d.get("VLAN"):
+        bits.append(f"VLAN {d['VLAN']}")
+    if d.get("描述"):
+        bits.append(d["描述"])
+    if d.get("IP"):
+        bits.append(f"IP {d['IP']}")
+    return "\n".join(bits) + "\n（点击端口格 → 打开该口配置生成器）"
+
+
 # ---------------------------------------------------------------- 连线
 class LinkItem(QGraphicsItem):
-    """两端节点之间的连线（位置实时跟随节点，无需重建）"""
+    """两端节点之间的连线（位置实时跟随节点，无需重建）。
 
-    def __init__(self, a, b, label="", dashed=False):
+    state 决定视觉语义（参数直接上图，不弹窗就能读懂链路）：
+      "up"       实线 + 主题绿   —— 链路 UP（电/光口正常转发）
+      "down"     实线 + 弱灰      —— 链路 DOWN
+      "unknown"  虚线 + 警戒橙   —— 有线但对端无 LLDP/MAC（未识别设备）
+      "console"  虚线 + 主题蓝   —— Console 管理线（不是转发链路）
+      默认        实线 + 常规灰   —— 普通链路（状态未知/未特别标注）
+    """
+
+    def __init__(self, a, b, label="", dashed=False, state=""):
         super().__init__()
         self.a, self.b = a, b
         self.label = label or ""
-        self.dashed = dashed
+        self.state = "console" if (not state and dashed) else state
+        if dashed and not state:
+            self.state = "console"
+        self.dashed = dashed or self.state in ("unknown", "console")
         self.setZValue(-1)
         a.links.append(self)
         b.links.append(self)
         scene = a.scene() or b.scene()
         if scene is not None:
             scene.addItem(self)   # 必须入场景，否则画不出来
+
+    def _pen(self):
+        color_map = {
+            "up": theme.t("success"),
+            "down": theme.t("scroll_handle"),
+            "unknown": theme.t("warning"),
+            "console": theme.t("accent"),
+        }
+        pen = QPen(QColor(color_map.get(self.state, theme.t("scroll_handle_hover"))), 2)
+        if self.state == "up":
+            pen.setWidth(3)          # UP 链路视觉加权（一眼看到主干）
+        if self.dashed:
+            pen.setStyle(Qt.DashLine)
+        return pen
 
     def boundingRect(self):
         pa, pb = self.a.scenePos(), self.b.scenePos()
@@ -103,23 +183,25 @@ class LinkItem(QGraphicsItem):
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
         pa, pb = self.a.scenePos(), self.b.scenePos()
-        pen = QPen(QColor("#AEBACB"), 2)
-        if self.dashed:
-            pen.setStyle(Qt.DashLine)
-        painter.setPen(pen)
+        painter.setPen(self._pen())
         painter.drawLine(pa, pb)
         if not self.label:
             return
         mid = (pa + pb) / 2
         font = QFont("Microsoft YaHei UI", 9)
+        if self.state == "up":
+            font.setBold(True)
         fm = QFontMetrics(font)
         tw = fm.horizontalAdvance(self.label) + 14
         th = fm.height() + 4
         rect = QRectF(mid.x() - tw / 2, mid.y() - th - 10, tw, th)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(255, 255, 255, 232))
+        label_bg = QColor(theme.t("card"))
+        label_bg.setAlpha(232)
+        painter.setBrush(label_bg)
         painter.drawRoundedRect(rect, 7, 7)
-        painter.setPen(QColor("#7A8699"))
+        painter.setPen(QColor(theme.t("text_muted") if self.state != "up"
+                              else theme.t("text")))
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignCenter, self.label)
 
@@ -130,9 +212,17 @@ class LinkItem(QGraphicsItem):
 
 # ---------------------------------------------------------------- 节点
 class DeviceNode(QGraphicsObject):
-    """可拖动设备节点（交换机 / PC / 邻居 / 终端），带矢量图标与悬停反馈"""
+    """可拖动设备节点（交换机 / PC / 邻居 / 终端），带矢量图标与悬停反馈。
 
-    def __init__(self, name, kind="switch", meta=None, subtitle=""):
+    v3 新增（参数结合拓扑）：
+      - 交换机节点（kind=switch 且有 ports 数据）画成**真实端口面板**：
+        按接口类型分组排布端口格，每格一盏状态灯，hover 看参数、点击进配置
+      - 所有节点支持**参数徽章**（IP / VLAN / 健康度等小胶囊直接上图）
+      - 布局以 _w/_h 自适应，端口面板节点比抽象图标宽得多
+    """
+
+    def __init__(self, name, kind="switch", meta=None, subtitle="",
+                 ports=None, badges=None, health=None):
         super().__init__()
         self.device_name = name or "设备"
         self.kind = kind
@@ -141,6 +231,14 @@ class DeviceNode(QGraphicsObject):
         self.links = []
         self._hover = False
         self._active = False
+
+        # ---- v3：端口面板 / 徽章 / 健康度 ----
+        self._ports = ports or []      # [{name, state, label, tip}]
+        self._badges = badges or []    # [(text, tone)]  tone: ip/vlan/ok/warn/danger
+        self._health = health          # (score, level)  交换机健康度徽章
+        self._port_rects = []          # paint 时缓存 [(name, QRectF)]（节点本地坐标）
+        self._hover_port = ""          # 当前 hover 的端口格
+        self._press_port = ""          # press 命中的端口格（release 同格才算点击）
 
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
@@ -156,9 +254,87 @@ class DeviceNode(QGraphicsObject):
         fm2 = QFontMetrics(QFont("Microsoft YaHei UI", 9))
         self._w = max(NODE_ICON_W, fm.horizontalAdvance(self.device_name) + 8,
                       fm2.horizontalAdvance(self.subtitle) + 8 if self.subtitle else 0)
+        self._compute_panel()
+
+    # ---- 端口面板几何 ----
+    def _compute_panel(self):
+        """交换机有 ports 时计算端口面板尺寸；其余节点维持旧尺寸"""
+        self._panel = None
+        if self.kind != "switch" or not self._ports:
+            return
+        # 按接口类型分组（GE 电口 / 10GE 光口 / 聚合口 …），保持采集顺序
+        groups = []
+        for p in self._ports:
+            if groups and groups[-1][0] == p["group"]:
+                groups[-1][1].append(p)
+            else:
+                groups.append((p["group"], [p]))
+        total_w = 0
+        total_h = 0
+        for gname, plist in groups:
+            n = len(plist)
+            # 端口数多于每行上限时铺满上限换行；少量时按实际数量收窄
+            cols = 12 if n > 12 else n
+            gw = cols * (PORT_CELL_W + PORT_CELL_GAP) - PORT_CELL_GAP + 2 * PORT_GROUP_PAD
+            rows = math.ceil(n / cols)
+            gh = rows * (PORT_CELL_H + PORT_CELL_GAP) - PORT_CELL_GAP + 2 * PORT_GROUP_PAD + 14
+            total_w = max(total_w, gw)
+            total_h += gh + 6
+        total_h -= 6
+        fm_name = QFontMetrics(QFont("Microsoft YaHei UI", 11, QFont.Bold))
+        fm_badge = QFontMetrics(QFont("Microsoft YaHei UI", 9))
+        badge_w = 0
+        x = 8
+        for text, tone in self._badges:
+            x += fm_badge.horizontalAdvance(text) + 18 + 6
+        badge_w = x
+        pw = max(total_w, fm_name.horizontalAdvance(self.device_name) + 20,
+                 fm_badge.horizontalAdvance(self.subtitle) + 16, badge_w) + 16
+        ph = 30 + total_h + (22 if self.subtitle else 0) + (26 if self._badges else 0) + 14
+        self._panel = {
+            "groups": groups, "pw": pw, "ph": ph,
+            "title_h": 30, "sub_h": 22 if self.subtitle else 0,
+            "badge_h": 26 if self._badges else 0,
+        }
+        self._w = max(self._w, pw)
+        # 预填命中表：没渲染过也能命中（测试/自动化友好）
+        self._port_rects = [(n, r, d) for n, r, d in self._panel_layout() if not n.startswith("_group:")]
+
+    def _panel_layout(self):
+        """端口格在节点本地坐标中的排布（画与命中共用一份，永不漂移）。
+        所有分组矩形统一面板宽（左右对齐），格子阵在组内居中——
+        光口/聚合口这类小分组不会挂左留大片空白（真机实测观感问题）"""
+        if not self._panel:
+            return []
+        p = self._panel
+        group_w = p["pw"] - 16
+        left = -p["pw"] / 2 + 8
+        y = -p["ph"] / 2 + p["title_h"]
+        rects = []
+        for gname, plist in p["groups"]:
+            n = len(plist)
+            cols = 12 if n > 12 else n
+            rows = math.ceil(n / cols)
+            gh = rows * (PORT_CELL_H + PORT_CELL_GAP) - PORT_CELL_GAP + 2 * PORT_GROUP_PAD
+            group_rect = QRectF(left, y, group_w, gh + 14)
+            rects.append(("_group:" + gname, group_rect, gname))
+            cells_w = cols * PORT_CELL_W + (cols - 1) * PORT_CELL_GAP
+            gx = left + (group_w - cells_w) / 2
+            gy = y + 14 + PORT_GROUP_PAD
+            for i, port in enumerate(plist):
+                r, c = divmod(i, cols)
+                cell = QRectF(gx + c * (PORT_CELL_W + PORT_CELL_GAP),
+                             gy + r * (PORT_CELL_H + PORT_CELL_GAP),
+                             PORT_CELL_W, PORT_CELL_H)
+                rects.append((port["name"], cell, port))
+            y += gh + 14 + 6
+        return rects
 
     # ---- 几何 ----
     def boundingRect(self):
+        if self._panel:
+            pw, ph = self._panel["pw"] + 24, self._panel["ph"] + 24
+            return QRectF(-pw / 2, -ph / 2, pw, ph)
         half = self._w / 2 + 12
         return QRectF(-half, -NODE_ICON_H / 2 - 14, half * 2, NODE_ICON_H + 76)
 
@@ -167,18 +343,21 @@ class DeviceNode(QGraphicsObject):
         if self.subtitle:
             lines.append(self.subtitle)
         lines += [f"{k}: {v}" for k, v in self.meta.items() if v]
-        lines.append("双击/右键 → 设备面板")
+        lines.append("双击/右键 → 设备面板；单击 → 右侧详情联动")
         return "\n".join(lines)
 
     # ---- 绘制 ----
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
-        fill, border = KIND_STYLE.get(self.kind, KIND_STYLE["host"])[:2]
+        if self._panel:
+            self._paint_switch_panel(painter)
+            return
+        fill, border = KIND_STYLE().get(self.kind, KIND_STYLE()["host"])[:2]
         fill, border = QColor(fill), QColor(border)
         if self.kind in ("placeholder", "unknown"):
             pen = QPen(border, 2, Qt.DashLine)
         elif self._hover or self._active:
-            pen = QPen(QColor("#0089FF") if self.kind != "host" else QColor("#5A6B82"), 3)
+            pen = QPen(QColor(theme.t("accent")) if self.kind != "host" else QColor(theme.t("text_sub")), 3)
         else:
             pen = QPen(border, 2)
 
@@ -186,28 +365,164 @@ class DeviceNode(QGraphicsObject):
         painter.setBrush(QBrush(fill))
         self._draw_icon(painter, fill, border)
 
-        # 名称（在图标下方，始终用深色，避免白字画在白底上不可见）
+        # 名称（在图标下方，颜色跟主题走，避免深色主题下黑字画在深底上）
         f = QFont("Microsoft YaHei UI", 10)
         f.setBold(True)
         painter.setFont(f)
-        painter.setPen(QColor("#1F2A37"))
+        painter.setPen(QColor(theme.t("text")))
         painter.drawText(QRectF(-self._w / 2, NODE_ICON_H / 2 + 2, self._w, 20),
                          Qt.AlignHCenter | Qt.AlignVCenter, self.device_name)
 
         # 副标题（端口 / 型号 / 说明）
         if self.subtitle:
             painter.setFont(QFont("Microsoft YaHei UI", 9))
-            painter.setPen(QColor("#7A8699"))
+            painter.setPen(QColor(theme.t("text_muted")))
             painter.drawText(QRectF(-self._w / 2, NODE_ICON_H / 2 + 22, self._w, 18),
                              Qt.AlignHCenter | Qt.AlignVCenter, self.subtitle)
 
+        # 参数徽章行（IP / VLAN 直接上图，不用点开任何窗口）
+        if self._badges:
+            self._paint_badges(painter, NODE_ICON_H / 2 + 44)
+
         # 选中环
         if self.isSelected():
-            painter.setPen(QPen(QColor("#0089FF"), 2, Qt.DotLine))
+            painter.setPen(QPen(QColor(theme.t("accent")), 2, Qt.DotLine))
             painter.setBrush(Qt.NoBrush)
             painter.drawRoundedRect(
                 QRectF(-self._w / 2 - 8, -NODE_ICON_H / 2 - 12,
                        self._w + 16, NODE_ICON_H + 22), 14, 14)
+
+    # ---- 真实端口面板（交换机） ----
+    def _paint_switch_panel(self, painter):
+        p = self._panel
+        rect = QRectF(-p["pw"] / 2, -p["ph"] / 2, p["pw"], p["ph"])
+
+        # 面板底：卡片色 + 细边；hover 时边框变主蓝
+        fill = QColor(theme.t("card"))
+        border = QColor(theme.t("accent") if (self._hover or self._active)
+                        else theme.t("border_strong"))
+        if self.isSelected():
+            border = QColor(theme.t("accent"))
+        painter.setPen(QPen(border, 2))
+        painter.setBrush(QBrush(fill))
+        painter.drawRoundedRect(rect, 12, 12)
+
+        # 标题行：设备名（左）+ 健康度徽章（右）
+        f_name = QFont("Microsoft YaHei UI", 11)
+        f_name.setBold(True)
+        painter.setFont(f_name)
+        painter.setPen(QColor(theme.t("text")))
+        name_rect = QRectF(rect.left() + 10, rect.top() + 4,
+                           p["pw"] - 26 - (54 if self._health else 0), 22)
+        painter.drawText(name_rect, Qt.AlignVCenter | Qt.AlignLeft, self.device_name)
+        if self._health:
+            score, level = self._health
+            tone = "ok" if score >= 85 else ("warn" if score >= 60 else "danger")
+            brect = QRectF(rect.right() - 60, rect.top() + 5, 52, 20)
+            self._paint_one_badge(painter, brect, f"♥ {score}", tone)
+
+        # 端口组
+        self._port_rects = []
+        for key, crect, data in self._panel_layout():
+            if key.startswith("_group:"):
+                # 组底 + 组名
+                gfill = QColor(theme.t("card_alt"))
+                if "光口" in data:
+                    gfill = QColor(theme.t("accent_light"))
+                    gfill.setAlpha(120)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(gfill)
+                painter.drawRoundedRect(crect, 8, 8)
+                painter.setPen(QColor(theme.t("text_muted")))
+                painter.setFont(QFont("Microsoft YaHei UI", 8))
+                painter.drawText(QRectF(crect.left() + PORT_GROUP_PAD, crect.top(),
+                                        crect.width() - 2 * PORT_GROUP_PAD, 13),
+                                 Qt.AlignVCenter | Qt.AlignLeft, data)
+                continue
+            self._port_rects.append((key, crect, data))
+            state = data["state"]
+            cell = crect.adjusted(0, 0, 0, 0)
+            hovered = key == self._hover_port
+            # 状态灯颜色：绿 UP / 灰 DOWN / 蓝 Trunk / 红边 shutdown / 空心 unknown
+            colors = {
+                "up": theme.t("success"),
+                "down": theme.t("track"),
+                "trunk": theme.t("accent"),
+                "shutdown": theme.t("danger"),
+                "unknown": theme.t("card"),
+            }
+            c = QColor(colors.get(state, theme.t("card")))
+            if state == "down":
+                c = QColor(theme.t("scroll_handle"))
+            painter.setBrush(QBrush(c))
+            border_col = QColor(theme.t("accent") if hovered
+                                else theme.t("border_strong"))
+            if state == "shutdown":
+                border_col = QColor(theme.t("danger"))
+            elif state == "unknown":
+                border_col = QColor(theme.t("border_strong"))
+            painter.setPen(QPen(border_col, 1 if not hovered else 2))
+            painter.drawRoundedRect(cell, 3, 3)
+            # 格内端口序号
+            fnum = QFont("Microsoft YaHei UI", 7)
+            painter.setFont(fnum)
+            num_col = QColor("#FFFFFF") if state in ("up", "trunk", "shutdown") \
+                else QColor(theme.t("text_muted"))
+            painter.setPen(num_col)
+            painter.drawText(cell, Qt.AlignCenter, data["label"])
+
+        # 副标题（型号 · 接口数）
+        if self.subtitle:
+            fy = rect.bottom() - p["badge_h"] - p["sub_h"] - 8
+            painter.setFont(QFont("Microsoft YaHei UI", 9))
+            painter.setPen(QColor(theme.t("text_muted")))
+            painter.drawText(QRectF(rect.left() + 10, fy, p["pw"] - 20, 18),
+                             Qt.AlignVCenter | Qt.AlignLeft, self.subtitle)
+
+        # 参数徽章行
+        if self._badges:
+            self._paint_badges(painter,
+                               rect.bottom() - p["badge_h"] - 10)
+
+    # ---- 徽章 ----
+    def _paint_badges(self, painter, top_y):
+        fm = QFontMetrics(QFont("Microsoft YaHei UI", 9))
+        x = -self._panel["pw"] / 2 + 10 if self._panel else -self._w / 2
+        y = top_y
+        for text, tone in self._badges:
+            w = fm.horizontalAdvance(text) + 18
+            self._paint_one_badge(painter, QRectF(x, y, w, 20), text, tone)
+            x += w + 6
+
+    def _paint_one_badge(self, painter, rect, text, tone):
+        """小胶囊徽章：浅底 + 深字（主题感知）"""
+        palette = {
+            "ip":    (theme.t("success"), theme.t("card")),
+            "vlan":  (theme.t("accent"), theme.t("card")),
+            "ok":    (theme.t("success"), theme.t("card")),
+            "warn":  (theme.t("warning"), theme.t("card")),
+            "danger": (theme.t("danger"), theme.t("card")),
+        }
+        fg, bg = palette.get(tone, (theme.t("text_sub"), theme.t("card")))
+        bgc = QColor(bg)
+        # 半透明浅底：拿前景色混一层白色（浅色主题）；深色主题混卡片色
+        if theme.is_dark():
+            base = QColor(theme.t("card"))
+            mixed = QColor(theme.t("card"))
+            t = 34
+            mixed.setRed((base.red() * (100 - t) + QColor(fg).red() * t) // 100)
+            mixed.setGreen((base.green() * (100 - t) + QColor(fg).green() * t) // 100)
+            mixed.setBlue((base.blue() * (100 - t) + QColor(fg).blue() * t) // 100)
+            bgc = mixed
+        else:
+            bgc = QColor(fg)
+            bgc.setAlpha(38)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(bgc)
+        painter.drawRoundedRect(rect, 10, 10)
+        painter.setPen(QColor(fg))
+        painter.setFont(QFont("Microsoft YaHei UI", 9))
+        painter.drawText(rect, Qt.AlignCenter, text)
 
     def _draw_icon(self, painter, fill, border):
         """按设备类型画矢量图标（不依赖任何图片资源）"""
@@ -226,7 +541,7 @@ class DeviceNode(QGraphicsObject):
             # 终端小方盒
             body = QRectF(-30, -22, 60, 40)
             painter.drawRoundedRect(body, 8, 8)
-            painter.setPen(QPen(QColor("#8E9AAF"), 2))
+            painter.setPen(QPen(QColor(theme.t("border_strong")), 2))
             painter.drawLine(QPointF(-18, 8), QPointF(18, 8))
         else:
             # 交换机：圆角机身 + 端口指示灯
@@ -234,13 +549,13 @@ class DeviceNode(QGraphicsObject):
             painter.drawRoundedRect(body, 12, 12)
             painter.setPen(Qt.NoPen)
             painter.setBrush(QBrush(QColor(255, 255, 255, 210) if self.kind == "switch"
-                                    else QColor("#C9D4E3")))
+                                    else QColor(theme.t("border_strong"))))
             for row in range(2):
                 for i in range(6):
                     painter.drawRoundedRect(
                         QRectF(-34 + i * 11.5, 2 + row * 9, 7, 6), 1.5, 1.5)
             if self.kind == "switch":
-                painter.setBrush(QBrush(QColor("#7CF29B")))
+                painter.setBrush(QBrush(QColor(theme.t("success"))))
                 painter.drawEllipse(QRectF(26, -20, 7, 7))
 
     # ---- 交互 ----
@@ -251,8 +566,50 @@ class DeviceNode(QGraphicsObject):
 
     def hoverLeaveEvent(self, event):
         self._hover = False
+        self._hover_port = ""
         self.update()
         super().hoverLeaveEvent(event)
+
+    def hoverMoveEvent(self, event):
+        """hover 端口格：tooltip 换成该端口的参数（VLAN/描述/状态）"""
+        hit = self._port_at(event.pos())
+        if hit != self._hover_port:
+            self._hover_port = hit[0] if hit else ""
+            tip = hit[2]["tip"] if hit else self._tooltip()
+            self.setToolTip(tip)
+            self.update()
+        super().hoverMoveEvent(event)
+
+    def _port_at(self, local_pos):
+        """命中检测：返回 (name, rect, data) 或 None"""
+        for name, rect, data in self._port_rects:
+            if rect.contains(local_pos):
+                return (name, rect, data)
+        return None
+
+    def mousePressEvent(self, event):
+        hit = self._port_at(event.pos()) if event.button() == Qt.LeftButton else None
+        if hit:
+            # 命中端口格：不启动拖动（吃掉 press），release 同格才触发配置
+            self._press_port = hit[0]
+            self._hover_port = hit[0]
+            self.update()
+            event.accept()
+            return
+        self._press_port = ""
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._press_port:
+            hit = self._port_at(event.pos())
+            if hit and hit[0] == self._press_port:
+                cb = getattr(self.scene(), "on_port_clicked", None)
+                if cb:
+                    cb(self, hit[0])
+            self._press_port = ""
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
@@ -261,6 +618,10 @@ class DeviceNode(QGraphicsObject):
         return super().itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
+        # 双击落在端口格上：不弹设备面板（避免误弹，端口单击已能进配置）
+        if self._port_at(event.pos()):
+            event.accept()
+            return
         cb = getattr(self.scene(), "on_node_activated", None)
         if cb:
             cb(self)
@@ -269,6 +630,9 @@ class DeviceNode(QGraphicsObject):
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):
+        if self._port_at(event.pos()):
+            event.accept()      # 端口格上右键不出设备菜单
+            return
         cb = getattr(self.scene(), "on_node_menu", None)
         if cb:
             cb(self, event.screenPos())
@@ -283,50 +647,61 @@ class TopologyScene(QGraphicsScene):
         super().__init__(parent)
         self.on_node_activated = None   # 双击回调
         self.on_node_menu = None        # 右键回调
+        self.on_port_clicked = None     # 端口格点击回调（v3：面板端口直配）
 
     def nodes(self):
         return [i for i in self.items() if isinstance(i, DeviceNode)]
 
     def auto_layout(self):
-        """自动布局：交换机居中，本机 PC 在左，邻居在右，终端在下方一行"""
+        """层级布局（参考 L0p4Map 层级拓扑范式，符合网络实际结构）：
+        - 交换机面板在顶部中央（运维视角的"根"）
+        - 本机 PC 在左侧（Console 维护位）
+        - LLDP 邻居 / 未识别设备第二层横排（同层设备）
+        - 终端第三层，按接入端口分组聚合（同端口下的终端挨着排）"""
         nodes = self.nodes()
         if not nodes:
             return
         sw = next((n for n in nodes if n.kind in ("switch", "placeholder")), None)
         pc = next((n for n in nodes if n.kind == "pc"), None)
-        # 未识别设备与 LLDP 邻居同属下游设备，统一排到右侧
-        # （若不处理，unknown 节点会停留在 (0,0) 与交换机重叠，遮住悬停/拖动手势）
         nbs = [n for n in nodes if n.kind in ("neighbor", "unknown")]
         hosts = [n for n in nodes if n.kind == "host"]
 
         if sw:
             sw.setPos(0, 0)
         if pc:
-            pc.setPos(-300, -10)
+            pc.setPos(-380, -40)
 
         if nbs:
             n = len(nbs)
-            radius = 240
+            per_row = 4
             for i, node in enumerate(nbs):
-                if n == 1:
-                    ang = 0.0
-                else:
-                    ang = math.radians(-62 + 124 * i / (n - 1))
-                node.setPos(140 + radius * math.cos(ang),
-                            radius * math.sin(ang) * 0.85)
+                row, col = divmod(i, per_row)
+                in_row = min(per_row, n - row * per_row)
+                # 交换机面板较宽，第二层从面板下方展开
+                x = (col - (in_row - 1) / 2) * 260
+                y = 210 + row * 130
+                node.setPos(x, y)
 
         if hosts:
-            m = len(hosts)
-            per_row = 4
-            for i, node in enumerate(hosts):
-                row, col = divmod(i, per_row)
-                in_row = min(per_row, m - row * per_row)
-                x = (col - (in_row - 1) / 2) * 196
-                node.setPos(x, 200 + row * 124)
+            # 按接入端口分组：同端口的终端聚成一列，端口与端口错开
+            groups = {}
+            order = []
+            for h in hosts:
+                key = _norm_port(h.meta.get("接入端口", "")) or "-"
+                if key not in groups:
+                    groups[key] = []
+                    order.append(key)
+                groups[key].append(h)
+            n_groups = len(order)
+            for gi, key in enumerate(order):
+                gx = (gi - (n_groups - 1) / 2) * 300
+                for hi, node in enumerate(groups[key]):
+                    node.setPos(gx + (hi % 2) * 150 - 75, 430 + hi * 110)
+                # 每组标一个"端口锚点"位置感：组首节点副标题已带端口名，无需额外画
 
         views = self.views()
         if views:
-            views[0].centerOn(0, 20)
+            views[0].centerOn(0, 160)
 
 
 # ---------------------------------------------------------------- 画布视图（点阵背景）
@@ -344,8 +719,8 @@ class TopologyView(QGraphicsView):
         self.setSceneRect(QRectF(-900, -600, 1800, 1200))
 
     def drawBackground(self, painter, rect):
-        painter.fillRect(rect, QColor("#F7F9FC"))
-        painter.setPen(QPen(QColor("#E4EAF3"), 1))
+        painter.fillRect(rect, QColor(theme.t("canvas_bg")))
+        painter.setPen(QPen(QColor(theme.t("canvas_grid")), 1))
         step = 28
         left = int(rect.left()) - int(rect.left()) % step
         top = int(rect.top()) - int(rect.top()) % step
@@ -380,76 +755,41 @@ class TopologyView(QGraphicsView):
 
 
 # ---------------------------------------------------------------- 通用对话框
-class DeviceDetailDialog(QDialog):
-    """设备面板：信息 + 操作按钮（把运维动作聚合到一处）"""
+class DeviceDetailDialog(BaseDialog):
+    """设备面板：信息 + 操作按钮（把运维动作聚合到一处）
+    v3 起日常"看参数"由右侧联动面板承担，本对话框专注"选操作"。"""
 
     def __init__(self, title, subtitle, rows, buttons, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumWidth(520)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(14)
-
-        t = QLabel(title)
-        t.setStyleSheet("font-size: 18px; font-weight: bold; color: #1F2A37;")
-        lay.addWidget(t)
-        if subtitle:
-            s = QLabel(subtitle)
-            s.setWordWrap(True)
-            s.setStyleSheet("font-size: 13px; color: #7A8699;")
-            lay.addWidget(s)
+        super().__init__(title, subtitle, parent, min_width=520)
 
         form = QFormLayout()
         form.setHorizontalSpacing(16)
         form.setVerticalSpacing(9)
         for label, value in rows:
             k = QLabel(f"{label}")
-            k.setStyleSheet("color: #7A8699; font-size: 13px;")
+            k.setStyleSheet("color: #5F6B7A; font-size: 13px;")
             v = QLabel(str(value) if value not in (None, "") else "—")
             v.setWordWrap(True)
             v.setTextInteractionFlags(Qt.TextSelectableByMouse)
             v.setStyleSheet("color: #1F2A37; font-size: 13px;")
             form.addRow(k, v)
-        lay.addLayout(form)
+        self.content_layout().addLayout(form)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(10)
+        # 旧代码传 objectName（primaryButton…），统一翻译成语义档位
+        role_map = {"primaryButton": "primary", "secondaryButton": "secondary",
+                    "ghostButton": "ghost", "dangerButton": "danger"}
         for text, cb, obj in buttons:
-            b = QPushButton(text)
-            b.setObjectName(obj or "secondaryButton")
-            b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _=False, f=cb: (self.accept(), f()))
-            btn_row.addWidget(b)
-        btn_row.addStretch()
-        lay.addLayout(btn_row)
-
-        close_row = QHBoxLayout()
-        close_row.addStretch()
-        close_btn = QPushButton("关闭")
-        close_btn.setObjectName("ghostButton")
-        close_btn.clicked.connect(self.reject)
-        close_row.addWidget(close_btn)
-        lay.addLayout(close_row)
+            self.add_button(text, role_map.get(obj or "", "secondary"), cb)
+        self.add_close_button()
 
 
-class PortTableDialog(QDialog):
+class PortTableDialog(BaseDialog):
     """端口表：每个口的配置 + 下挂终端（定位"哪个口接了什么东西"）"""
 
     def __init__(self, rows, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("端口一览")
-        self.setMinimumSize(760, 520)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 16, 18, 16)
-        lay.setSpacing(10)
-
-        tip = QLabel("按接口列出配置/链路状态/下挂终端（running-config + MAC/ARP 表 + 端口链路状态，只读）")
-        tip.setStyleSheet("color: #7A8699; font-size: 12px;")
-        lay.addWidget(tip)
+        super().__init__("端口一览", "按接口列出配置/链路状态/下挂终端"
+                         "（running-config + MAC/ARP 表 + 端口链路状态，只读）",
+                         parent, min_width=760, min_height=520)
 
         table = QTableWidget(len(rows), 5)
         table.setHorizontalHeaderLabels(["接口", "状态", "描述", "VLAN", "下挂终端"])
@@ -466,45 +806,34 @@ class PortTableDialog(QDialog):
             for c, val in enumerate(row):
                 item = QTableWidgetItem(str(val))
                 if c == 1:
-                    color = "#34C759" if val == "up" else ("#FA5151" if val == "down" else "#7A8699")
+                    color = theme.t("success") if val == "up" else (
+                        theme.t("danger") if val == "down" else theme.t("text_muted"))
                     item.setForeground(QBrush(QColor(color)))
                 table.setItem(r, c, item)
-        lay.addWidget(table, 1)
-
-        btn = QPushButton("关闭")
-        btn.setObjectName("ghostButton")
-        btn.clicked.connect(self.accept)
-        row = QHBoxLayout()
-        row.addStretch()
-        row.addWidget(btn)
-        lay.addLayout(row)
+        self.add_content(table, 1)
+        self.add_close_button()
 
 
-class PortConfigDialog(QDialog):
+class PortConfigDialog(BaseDialog):
     """端口级配置生成器（Access/Trunk）——交换机最基础的操作。
     端口列表来自最近一次采集的真实接口（多选），按当前设备厂商语法生成命令；
     只生成不自动下发：命令送 Console「配置原文」框，由用户点「下发到设备」并确认后才写入设备
     （保持只读红线：写入永远走显式确认的下发闭环）。
-    布局：左端口右表单底部预览——长文本/长列表左右并列，不上下堆叠压高度。"""
+    布局：左端口右表单底部预览——长文本/长列表左右并列，不上下堆叠压高度。
+    v3：支持从拓扑端口格点击进入并预选该端口。"""
 
-    def __init__(self, ports, vendor, parent=None, vlan_map=None):
-        super().__init__(parent)
-        self.setWindowTitle("端口配置（Access / Trunk）")
-        self.setMinimumSize(880, 560)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
+    def __init__(self, ports, vendor, parent=None, vlan_map=None, preselect=None):
+        super().__init__(
+            "端口配置（Access / Trunk）",
+            f"多选左侧端口 → 按当前设备厂商（{vendor or 'huawei'}）语法生成命令；"
+            "「送往下发」会填入 Console 页，点「下发到设备」确认后才写入设备",
+            parent, min_width=880, min_height=560)
         self._vendor = vendor or "huawei"
         self._lines = []          # [(cmd, 中文释义)]
         self._vlan_map = vlan_map or {}   # 端口名 → 当前 Access VLAN（采集读到的，预填用）
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 16, 18, 16)
+        lay = self.content_layout()
         lay.setSpacing(10)
-
-        tip = QLabel(f"多选左侧端口 → 按当前设备厂商（{self._vendor}）语法生成命令；"
-                     "「送往下发」会填入 Console 页，点「下发到设备」确认后才写入设备")
-        tip.setStyleSheet("color: #7A8699; font-size: 12px;")
-        tip.setWordWrap(True)
-        lay.addWidget(tip)
 
         body = QHBoxLayout()
         body.setSpacing(14)
@@ -583,22 +912,21 @@ class PortConfigDialog(QDialog):
 
         lay.addLayout(body, 1)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        self.copy_btn = QPushButton("📋 复制纯命令")
-        self.copy_btn.setObjectName("secondaryButton")
-        self.copy_btn.clicked.connect(self.copy_commands)
-        self.send_btn = QPushButton("⤴ 送往下发（Console 页）")
-        self.send_btn.setObjectName("primaryButton")
-        self.send_btn.clicked.connect(self.send_to_deploy)
-        close_btn = QPushButton("关闭")
-        close_btn.setObjectName("ghostButton")
-        close_btn.clicked.connect(self.reject)
-        btn_row.addStretch()
-        btn_row.addWidget(self.copy_btn)
-        btn_row.addWidget(self.send_btn)
-        btn_row.addWidget(close_btn)
-        lay.addLayout(btn_row)
+        # ---- 预选端口（从拓扑端口格点击进入） ----
+        if preselect:
+            sel = set(preselect)
+            for i in range(self.port_list.count()):
+                if self.port_list.item(i).data(Qt.UserRole) in sel:
+                    self.port_list.item(i).setSelected(True)
+            if self.port_list.selectedItems():
+                self.port_list.scrollToItem(self.port_list.selectedItems()[0])
+
+        # ---- 底部按钮行 ----
+        self.copy_btn = self.add_button("📋 复制纯命令", "secondary",
+                                        self.copy_commands, close_on_click=False)
+        self.send_btn = self.add_button("⤴ 送往下发（Console 页）", "primary",
+                                        self.send_to_deploy, close_on_click=False)
+        self.add_close_button()
 
     def _on_type_changed(self, idx):
         self.access_vlan.setEnabled(idx == 0)
@@ -624,7 +952,7 @@ class PortConfigDialog(QDialog):
     def generate(self):
         ports = [it.data(Qt.UserRole) for it in self.port_list.selectedItems()]
         if not ports:
-            QMessageBox.warning(self, "端口配置", "请先在左侧选择端口（按住 Ctrl/Shift 可多选）")
+            warn_box(self, "端口配置", "请先在左侧选择端口（按住 Ctrl/Shift 可多选）")
             return
         mode = "access" if self.type_combo.currentIndex() == 0 else "trunk"
         desc = self.desc_edit.text().strip()
@@ -635,7 +963,7 @@ class PortConfigDialog(QDialog):
             else:
                 raw = self.trunk_vlans.text().strip()
                 if not raw:
-                    QMessageBox.warning(self, "端口配置", "Trunk 需要填写放行 VLAN（如：1 5 999 to 1048）")
+                    warn_box(self, "端口配置", "Trunk 需要填写放行 VLAN（如：1 5 999 to 1048）")
                     return
                 vids = [str(v) for v in expand_vlan_body(raw)]
                 lines += e_port_trunk(self._vendor, p, vids)
@@ -648,45 +976,39 @@ class PortConfigDialog(QDialog):
 
     def copy_commands(self):
         if not self._lines:
-            QMessageBox.warning(self, "端口配置", "请先点「生成命令」")
+            warn_box(self, "端口配置", "请先点「生成命令」")
             return
         QApplication.clipboard().setText(self._plain())
-        QMessageBox.information(self, "端口配置", f"已复制 {len(self._lines)} 行纯命令（无注释），可直接粘贴")
+        info_box(self, "端口配置", f"已复制 {len(self._lines)} 行纯命令（无注释），可直接粘贴")
 
     def send_to_deploy(self):
         """把生成的命令填入 Console 页「配置原文」框并跳转；真正的写入仍需用户点「下发到设备」确认"""
         if not self._lines:
-            QMessageBox.warning(self, "端口配置", "请先点「生成命令」")
+            warn_box(self, "端口配置", "请先点「生成命令」")
             return
         page = self.parent()          # NetworkTopologyPage
         main = page.window() if page else None
         cv = getattr(main, "tabs", {}).get("console_viz") if main else None
         if cv is None:
-            QMessageBox.information(self, "端口配置", "未找到 Console 页（主窗口未就绪）")
+            info_box(self, "端口配置", "未找到 Console 页（主窗口未就绪）")
             return
-        if QMessageBox.question(
+        if not question_box(
                 self, "送往下发",
                 f"将把 {len(self._lines)} 行命令填入 Console 页「配置原文」框（替换当前内容），\n"
-                "随后请在该页点「下发到设备」并确认——是否继续？") != QMessageBox.Yes:
+                "随后请在该页点「下发到设备」并确认——是否继续？"):
             return
         cv.raw_view.setPlainText(self._plain())
         page._goto("Console 可视化")
         self.accept()
 
 
-class AddDeviceDialog(QDialog):
+class AddDeviceDialog(BaseDialog):
     """手工添加设备（没有 LLDP 时也能把真实网络画出来）"""
 
     TYPES = ["交换机", "PC / 服务器", "路由器", "防火墙", "AP / 其他"]
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("添加设备")
-        self.setMinimumWidth(460)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(22, 20, 22, 18)
-        lay.setSpacing(12)
+        super().__init__("添加设备", "", parent, min_width=460)
 
         form = QFormLayout()
         form.setSpacing(10)
@@ -705,14 +1027,10 @@ class AddDeviceDialog(QDialog):
         form.addRow("管理 IP", self.ip_edit)
         form.addRow("接入端口", self.port_edit)
         form.addRow("备注", self.note_edit)
-        lay.addLayout(form)
+        self.content_layout().addLayout(form)
 
-        box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        box.button(QDialogButtonBox.Ok).setText("添加")
-        box.button(QDialogButtonBox.Cancel).setText("取消")
-        box.accepted.connect(self.accept)
-        box.rejected.connect(self.reject)
-        lay.addWidget(box)
+        self.add_button("添加", "primary", None)   # accept 由回调统一处理
+        self.add_close_button("取消", "ghost")
         self.name_edit.setFocus()
 
     def data(self):
@@ -737,6 +1055,20 @@ class NetworkTopologyPage(QWidget):
         self._manual = []        # 手工添加的节点
         self.initUI()
         self.clear_config()
+        # 画布是手绘的（不走 QSS 重映射），主题切换时整体重绘一次
+        theme.on_change(self._refresh_theme)
+
+    def _refresh_theme(self):
+        scene = getattr(self, "scene", None)
+        if scene is not None:
+            scene.update()
+        view = getattr(self, "view", None)
+        if view is not None:
+            view.viewport().update()
+        # 图例色块跟主题走（富文本里埋的是当前主题色值，切后必须重生成）
+        legend = getattr(self, "legend_label", None)
+        if legend is not None:
+            self._refresh_legend()
 
     # ---------------- UI ----------------
     def initUI(self):
@@ -752,6 +1084,12 @@ class NetworkTopologyPage(QWidget):
         collect_btn.setObjectName("primaryButton")
         collect_btn.setToolTip("在当前页直接通过 Console 线采集交换机信息")
         collect_btn.clicked.connect(self.collect_now)
+
+        panel_btn = QPushButton("🖥 设备面板")
+        panel_btn.setObjectName("primaryButton")
+        panel_btn.setToolTip("把交换机画成端口面板：颜色看状态、点端口看参数，\n"
+                             "改参数实时出命令，一键应用（经确认后写入设备）")
+        panel_btn.clicked.connect(self.show_device_panel)
 
         help_btn = QPushButton("为什么只有自己？")
         help_btn.setObjectName("ghostButton")
@@ -775,9 +1113,14 @@ class NetworkTopologyPage(QWidget):
         fit_btn.setObjectName("ghostButton")
         fit_btn.clicked.connect(lambda: self.view.fit_content())
 
-        for w in (collect_btn, help_btn, add_btn, ports_btn, layout_btn, fit_btn):
+        for w in (collect_btn, panel_btn, help_btn, add_btn, ports_btn,
+                  layout_btn, fit_btn):
             bar.addWidget(w)
         layout.addLayout(bar)
+
+        # ---- 画布（左） + 详情面板（右）：参数结合拓扑的联动核心 ----
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
 
         canvas_group = QGroupBox("拓扑视图")
         canvas_lay = QVBoxLayout(canvas_group)
@@ -785,7 +1128,17 @@ class NetworkTopologyPage(QWidget):
         self.scene = TopologyScene(self)
         self.view = TopologyView(self.scene)
         canvas_lay.addWidget(self.view)
-        layout.addWidget(canvas_group, 1)
+        # 图例（色块富文本，主题切换时刷新）
+        self.legend_label = QLabel()
+        self.legend_label.setStyleSheet("font-size: 12px; color: #5F6B7A; background: transparent;")
+        canvas_lay.addWidget(self.legend_label)
+        self.splitter.addWidget(canvas_group)
+
+        self.splitter.addWidget(self._build_detail_panel())
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setSizes([9000, 330])
+        layout.addWidget(self.splitter, 1)
 
         self.status_label = QLabel("尚未连接交换机 —— 点「🔌 一键采集」开始")
         self.status_label.setWordWrap(True)
@@ -793,13 +1146,126 @@ class NetworkTopologyPage(QWidget):
         layout.addWidget(self.status_label)
 
         self.hint_label = QLabel(
-            "💡 双击节点打开设备面板 ｜ 右键节点选择操作 ｜ 拖动节点移动 ｜ 滚轮缩放 ｜ 空白处拖动平移")
+            "💡 单击节点 → 右侧看参数 ｜ 交换机端口格：hover 看状态，点击直接配置 ｜ 双击节点打开操作面板 ｜ 拖动/滚轮缩放/空白平移")
         self.hint_label.setWordWrap(True)
         self.hint_label.setStyleSheet("color: #9AA7B8; font-size: 12px;")
         layout.addWidget(self.hint_label)
 
         self.scene.on_node_activated = self.open_device_panel
         self.scene.on_node_menu = self._show_node_menu
+        self.scene.on_port_clicked = self._on_port_clicked
+        self.scene.selectionChanged.connect(self._on_selection_changed)
+        self._refresh_legend()
+
+    def _refresh_legend(self):
+        """图例：端口灯与连线颜色语义（画布上直接读图，不用猜）"""
+        def dot(c):
+            return (f"<span style='background:{c};color:{c}'>&nbsp;&nbsp;&nbsp;</span>")
+        t = theme.t
+        self.legend_label.setText(
+            f"端口格：{dot(t('success'))} UP　{dot(t('scroll_handle'))} DOWN　"
+            f"{dot(t('accent'))} Trunk　{dot(t('danger'))} 已shutdown　"
+            f"｜ 连线：{dot(t('success'))} UP链路　{dot(t('warning'))} 未识别链路"
+            f"　{dot(t('accent'))} Console管理线（虚线）")
+
+    # ---------------- 右侧详情面板（单击联动，非模态） ----------------
+    def _build_detail_panel(self):
+        """侧边详情面板：选中节点的参数 + 常用操作，单击即联动（不用双击弹窗）"""
+        panel = QWidget()
+        panel.setStyleSheet("""
+            QWidget#detailPanel { background: #FFFFFF; border: 1px solid #DFE6F0;
+                                  border-radius: 12px; }
+        """)
+        panel.setObjectName("detailPanel")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
+
+        self.detail_title = QLabel("未选择设备")
+        self.detail_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1F2A37;")
+        self.detail_title.setWordWrap(True)
+        lay.addWidget(self.detail_title)
+
+        self.detail_kind = QLabel("单击拓扑中的节点，参数直接显示在这里")
+        self.detail_kind.setStyleSheet("font-size: 12px; color: #5F6B7A;")
+        self.detail_kind.setWordWrap(True)
+        lay.addWidget(self.detail_kind)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.detail_body = QWidget()
+        self.detail_body.setStyleSheet("background: transparent;")
+        self._detail_form = QFormLayout(self.detail_body)
+        self._detail_form.setContentsMargins(0, 8, 0, 8)
+        self._detail_form.setHorizontalSpacing(14)
+        self._detail_form.setVerticalSpacing(8)
+        scroll.setWidget(self.detail_body)
+        lay.addWidget(scroll, 1)
+
+        self.detail_btn_col = QVBoxLayout()
+        self.detail_btn_col.setSpacing(8)
+        lay.addLayout(self.detail_btn_col)
+        lay.addStretch()
+        return panel
+
+    def _on_selection_changed(self):
+        nodes = [i for i in self.scene.selectedItems() if isinstance(i, DeviceNode)]
+        self._show_detail(nodes[0] if len(nodes) == 1 else None)
+
+    def _show_detail(self, node):
+        """侧板填充：参数行 + 操作按钮（保持与设备面板同一套动作）"""
+        # 清空旧内容
+        while self._detail_form.count():
+            item = self._detail_form.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        while self.detail_btn_col.count():
+            item = self.detail_btn_col.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+
+        if node is None:
+            self.detail_title.setText("未选择设备")
+            self.detail_kind.setText("单击拓扑中的节点，参数直接显示在这里")
+            return
+
+        self.detail_title.setText(node.device_name)
+        kind_txt = {"switch": "交换机（本机采集）", "pc": "本机 PC",
+                    "neighbor": "邻居设备", "host": "终端设备",
+                    "unknown": "未识别设备（端口有链路，对端无 LLDP 信息）",
+                    "placeholder": "交换机（未采集）"}.get(node.kind, "未知")
+        self.detail_kind.setText(f"{kind_txt}" + (f" ｜ {node.subtitle}" if node.subtitle else ""))
+
+        f_key = "color: #5F6B7A; font-size: 13px;"
+        f_val = "color: #1F2A37; font-size: 13px;"
+        for k, v in node.meta.items():
+            if v in (None, ""):
+                continue
+            lab = QLabel(str(k))
+            lab.setStyleSheet(f_key)
+            val = QLabel(str(v))
+            val.setWordWrap(True)
+            val.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            val.setStyleSheet(f_val)
+            self._detail_form.addRow(lab, val)
+
+        # 操作按钮（与 open_device_panel 同一套动作，非模态版）
+        rows, buttons = self._panel_actions(node)
+        for text, cb, obj in buttons:
+            role = {"primaryButton": "primary", "secondaryButton": "secondary",
+                    "ghostButton": "ghost", "dangerButton": "danger"}.get(obj, "secondary")
+            btn = make_button(text, role, self)
+            btn.clicked.connect(lambda _=False, f=cb: f())
+            self.detail_btn_col.addWidget(btn)
+        if node.kind == "switch" and node._ports:
+            tip = QLabel(f"端口格已画在节点上（{len(node._ports)} 口）：悬停看参数、点击端口进配置")
+            tip.setStyleSheet("color: #9AA7B8; font-size: 12px;")
+            tip.setWordWrap(True)
+            self.detail_btn_col.addWidget(tip)
 
     # ---------------- 契约方法（主窗口切换品牌时会调用） ----------------
     def clear_config(self):
@@ -815,10 +1281,12 @@ class NetworkTopologyPage(QWidget):
         from modules.host_info import local_host
         host = local_host()
         ips = [i for i in host["ips"] if not i.startswith("169.254.")] or host["ips"]
+        pc_ip = ips[0] if ips else "未获取"
         self._pc_node = DeviceNode(host["name"], "pc",
-                                   meta={"IP": (ips[0] if ips else "未获取"),
+                                   meta={"IP": pc_ip,
                                          "角色": "运维终端（本机）"},
-                                   subtitle="本机 PC")
+                                   subtitle="本机 PC",
+                                   badges=[(f"IP {pc_ip}", "ip")] if pc_ip != "未获取" else [])
         self._sw_node = DeviceNode("交换机（未采集）", "placeholder",
                                    meta={"说明": "点右上角「一键采集」读取设备"},
                                    subtitle="等待连接")
@@ -837,7 +1305,7 @@ class NetworkTopologyPage(QWidget):
         tab_widget = getattr(main, "tab_widget", None)
         console = getattr(main, "tabs", {}).get("console_viz") if hasattr(main, "tabs") else None
         if tab_widget is None or console is None:
-            QMessageBox.information(self, "提示", "未找到 Console 采集页")
+            info_box(self, "提示", "未找到 Console 采集页")
             return
         # 切到 Console 页，让用户看到进度与日志
         for i in range(tab_widget.count()):
@@ -878,31 +1346,48 @@ class NetworkTopologyPage(QWidget):
                                    meta={"IP": (pc_ips[0] if pc_ips else "未获取"),
                                          "角色": "运维终端（本机）",
                                          "Console": console_port or "—"},
-                                   subtitle="本机 PC")
+                                   subtitle="本机 PC",
+                                   badges=[(f"IP {pc_ips[0]}", "ip")] if pc_ips else [])
         self.scene.addItem(self._pc_node)
 
-        # 交换机
+        # 交换机：真实端口面板 + 参数徽章 + 健康度（v3 参数结合拓扑）
         meta = dict(local_meta)
         if console_port:
             meta["管理通道"] = f"Console {console_port}"
         n_if = len(parsed.get("interfaces") or [])
         sw_sub = f"{vendor} · {n_if} 个接口" if (vendor and n_if) else (vendor or "")
-        sw = DeviceNode(local_name or "交换机", "switch", meta=meta, subtitle=sw_sub)
+        ports = self._build_port_cells(parsed, link_up)
+        sw_badges = []
+        mgmt_ip = self._switch_mgmt_ip()
+        if mgmt_ip:
+            sw_badges.append((f"管理 IP {mgmt_ip}", "ip"))
+        model = str(local_meta.get("型号") or "").strip()
+        if model and len(model) <= 18:
+            sw_badges.append((model, "vlan"))
+        health_badge = None
+        if health and isinstance(health.get("score"), (int, float)):
+            health_badge = (int(health["score"]), health.get("level") or "")
+        sw = DeviceNode(local_name or "交换机", "switch", meta=meta, subtitle=sw_sub,
+                        ports=ports, badges=sw_badges, health=health_badge)
         self.scene.addItem(sw)
         self._sw_node = sw
 
         pc_link_label = f"Console {console_port}" if console_port else "Console 线"
-        LinkItem(self._pc_node, sw, pc_link_label)
+        LinkItem(self._pc_node, sw, pc_link_label, state="console")
 
         # LLDP 邻居
         for nb in neighbors:
             name = nb.get("name") or nb.get("peer", "邻居设备")
+            nb_badges = []
+            if nb.get("peer_port"):
+                nb_badges.append((f"对端 {nb.get('peer_port')}", "vlan"))
             node = DeviceNode(name, "neighbor",
                               meta={"对端端口": nb.get("peer_port", ""),
                                     "本地端口": nb.get("port", "")},
-                              subtitle=f"经 {nb.get('port', '')}")
+                              subtitle=f"经 {nb.get('port', '')}",
+                              badges=nb_badges)
             self.scene.addItem(node)
-            LinkItem(sw, node, nb.get("port", ""))
+            LinkItem(sw, node, nb.get("port", ""), state="up")
 
         # 终端（来自 MAC/ARP 表）——本机 MAC 的那个就是"本机 PC"
         port_hosts = {}
@@ -917,23 +1402,31 @@ class NetworkTopologyPage(QWidget):
                 self._pc_node.meta["MAC"] = h.get("mac_display", "")
                 if h.get("ip"):
                     self._pc_node.meta["IP"] = h["ip"]
+                self._pc_node._badges = [(f"IP {h['ip']}", "ip")] if h.get("ip") else []
                 # 本机其实是这样连的：撤掉 Console 线，改画接入端口链路
                 for item in list(self.scene.items()):
                     if isinstance(item, LinkItem) and item.a is self._pc_node:
                         self.scene.removeItem(item)
                         self._pc_node.links.clear()
-                LinkItem(self._pc_node, sw, f"接入 {_short_port(port)}" if port else "直连")
+                LinkItem(self._pc_node, sw, f"接入 {_short_port(port)}" if port else "直连",
+                         state="up")
                 self._pc_node.setToolTip(self._pc_node._tooltip())
                 continue
             label = h.get("ip") or h.get("mac_display", "终端")
+            h_badges = []
+            if h.get("ip"):
+                h_badges.append((f"IP {h['ip']}", "ip"))
+            if h.get("vlan"):
+                h_badges.append((f"VLAN {h['vlan']}", "vlan"))
             node = DeviceNode(label, "host",
                               meta={"MAC": h.get("mac_display", ""),
                                     "IP": h.get("ip", "") or "未获取",
                                     "接入端口": port,
                                     "VLAN": h.get("vlan", "")},
-                              subtitle=f"{_short_port(port)} · VLAN {h.get('vlan') or '-'}")
+                              subtitle=f"{_short_port(port)} · VLAN {h.get('vlan') or '-'}",
+                              badges=h_badges)
             self.scene.addItem(node)
-            LinkItem(sw, node, "")   # 节点下方已标端口，连线不再重复写
+            LinkItem(sw, node, "", state="up")   # 节点下方已标端口，连线不再重复写
 
         # 有链路但没有任何发现数据的端口 → 「未识别设备」
         # 真实场景：对端交换机未启用 LLDP（思科等出厂默认关）或哑交换机；
@@ -959,11 +1452,34 @@ class NetworkTopologyPage(QWidget):
                                             "（对端未启用 LLDP 或为非管理型交换机）"},
                               subtitle=f"{_short_port(port)} · 有链路")
             self.scene.addItem(node)
-            LinkItem(sw, node, f"{_short_port(port)} · 有链路")
+            LinkItem(sw, node, f"{_short_port(port)} · 有链路", state="unknown")
 
         self.scene.auto_layout()
         self.view.fit_content()
         self._update_status(sw, neighbors, end_hosts, unknown_ports)
+
+    # ---------------- 端口面板数据装配 ----------------
+    def _build_port_cells(self, parsed, link_up):
+        """采集接口 → 端口格列表（只画物理/聚合口，SVI/NULL/管理口不上面板）"""
+        cells = []
+        for itf in parsed.get("interfaces") or []:
+            name = itf["name"]
+            if name.lower().startswith(("vlan", "vlanif", "null", "m-gigabit",
+                                       "mgigabit", "loopback", "inloop", "tunnel")):
+                continue
+            state = _port_state(itf, link_up)
+            cells.append({
+                "name": name,
+                "state": state,
+                "label": _port_label(name),
+                "group": itf.get("kind") or "其他",
+                "tip": _port_tip(itf, state),
+            })
+        return cells
+
+    def _on_port_clicked(self, node, port_name):
+        """点击端口格 → 直接打开该口配置生成器（预选）"""
+        self.show_port_config(preselect=[port_name])
 
     def _update_status(self, sw, neighbors, end_hosts, unknown_ports=None):
         parsed = self._data.get("parsed") or {}
@@ -992,10 +1508,11 @@ class NetworkTopologyPage(QWidget):
                 "换台在用的电脑接入后再采集即可看到它。")
         else:
             self.hint_label.setText(
-                "💡 双击节点打开设备面板 ｜ 右键节点选择操作 ｜ 拖动节点移动 ｜ 滚轮缩放 ｜ 空白处拖动平移")
+                "💡 单击节点 → 右侧看参数 ｜ 交换机端口格：hover 看状态，点击直接配置 ｜ 双击节点打开操作面板 ｜ 拖动/滚轮缩放/空白平移")
 
     # ---------------- 交互：设备面板 ----------------
-    def open_device_panel(self, node):
+    def _panel_actions(self, node):
+        """设备面板的动作集（弹窗版与侧板联动版共用同一份）"""
         rows, buttons = [], []
         kind = node.kind
         rows.append(("设备类型", {"switch": "交换机（本机采集）", "pc": "本机 PC",
@@ -1007,7 +1524,8 @@ class NetworkTopologyPage(QWidget):
 
         if kind in ("switch", "placeholder"):
             buttons = [
-                ("端口配置（Access/Trunk）", self.show_port_config, "primaryButton"),
+                ("端口面板（可视化配置）", self.show_device_panel, "primaryButton"),
+                ("端口配置（Access/Trunk）", self.show_port_config, "secondaryButton"),
                 ("查看完整配置", lambda: self._goto("Console 可视化"), "secondaryButton"),
                 ("配置健康度", self._show_health, "secondaryButton"),
                 ("端口一览", self.show_port_table, "secondaryButton"),
@@ -1026,7 +1544,10 @@ class NetworkTopologyPage(QWidget):
                 buttons.append((f"Ping {ip}", lambda: self._ping(ip, node.device_name), "secondaryButton"))
             buttons.append(("复制信息", lambda: self._copy_node(node), "ghostButton"))
             buttons.append(("删除节点", lambda: self._remove_node(node), "ghostButton"))
+        return rows, buttons
 
+    def open_device_panel(self, node):
+        rows, buttons = self._panel_actions(node)
         DeviceDetailDialog(node.device_name, node.subtitle, rows, buttons, self).exec_()
         # 面板是模态的：双击的收尾 release 会被模态事件循环吃掉，场景既认为按键仍按着、
         # 抓取者也残留——用户关掉面板后的下一击会被重定向到旧节点（拖错节点/再双击又
@@ -1053,6 +1574,7 @@ class NetworkTopologyPage(QWidget):
         menu.addAction("设备面板", lambda: self.open_device_panel(node))
         menu.addSeparator()
         if node.kind in ("switch", "placeholder"):
+            menu.addAction("端口面板（可视化配置）", self.show_device_panel)
             menu.addAction("端口配置（Access/Trunk）", self.show_port_config)
             menu.addAction("查看完整配置", lambda: self._goto("Console 可视化"))
             menu.addAction("配置健康度体检", self._show_health)
@@ -1100,7 +1622,7 @@ class NetworkTopologyPage(QWidget):
     def _show_health(self):
         health = self._data.get("health")
         if not health:
-            QMessageBox.information(
+            info_box(
                 self, "配置健康度",
                 "还没有体检数据。\n\n请先点「🔌 一键采集」读取交换机配置，"
                 "系统会按等保/基线自动打分。")
@@ -1120,8 +1642,8 @@ class NetworkTopologyPage(QWidget):
         parsed = (self._data.get("parsed") or {})
         ifaces = parsed.get("interfaces") or []
         if not ifaces:
-            QMessageBox.information(self, "端口一览",
-                                    "还没有接口数据。\n\n请先点「🔌 一键采集」。")
+            info_box(self, "端口一览",
+                     "还没有接口数据。\n\n请先点「🔌 一键采集」。")
             return
         # 端口 → 下挂终端
         by_port = {}
@@ -1161,13 +1683,26 @@ class NetworkTopologyPage(QWidget):
                         break
         PortTableDialog(rows, self).exec_()
 
-    def show_port_config(self):
+    def show_device_panel(self):
+        """设备面板（大端口矩阵 + 参数卡 + 实时命令预览）——傻瓜式配置主入口。
+        对标 eSight/IMC 设备面板视图；非模态 show()：可与拓扑同屏观察，
+        面板选中端口会联动拓扑端口格高亮。"""
+        parsed = (self._data.get("parsed") or {})
+        if not (parsed.get("interfaces") or []):
+            info_box(self, "设备面板",
+                     "还没有接口数据。\n\n请先点「🔌 一键采集」，端口面板会自动画出来。")
+            return
+        from gui.dialogs.device_panel import DevicePanelDialog
+        DevicePanelDialog(self).show()     # 非模态：parent=本页，Qt 对象树托管生命周期
+
+    def show_port_config(self, preselect=None):
         """端口级配置（Access/Trunk）：交换机最基础的操作。
-        用采集到的真实端口列表 + 当前厂商语法生成命令，经 Console 下发闭环写回设备"""
+        用采集到的真实端口列表 + 当前厂商语法生成命令，经 Console 下发闭环写回设备。
+        v3：拓扑端口格点击进入时 preselect 预选该口"""
         parsed = (self._data.get("parsed") or {})
         ifaces = parsed.get("interfaces") or []
         if not ifaces:
-            QMessageBox.information(
+            info_box(
                 self, "端口配置",
                 "还没有接口数据。\n\n请先点「🔌 一键采集」，端口列表会自动带出。")
             return
@@ -1188,7 +1723,7 @@ class NetworkTopologyPage(QWidget):
                 bits.append(d["描述"])
             ports.append((name, " · ".join(bits)))
         if not ports:
-            QMessageBox.information(self, "端口配置", "未解析出可配置的物理端口。")
+            info_box(self, "端口配置", "未解析出可配置的物理端口。")
             return
         # 端口当前 Access VLAN 映射（选中后自动预填，能读到的信息不让人填）
         vlan_map = {}
@@ -1197,14 +1732,15 @@ class NetworkTopologyPage(QWidget):
             if m:
                 vlan_map[itf["name"]] = int(m.group(1))
         # 注意：_data["vendor"] 存的是显示标签（如 "H3C"），发射器按小写厂商键匹配，
-        # 必须小写化——否则语法分支全部落空、误走思科兜底
+        # 必须小写化——否则语法分支全部落空、误走思科兑底
         vendor = (self._data.get("vendor") or "huawei").lower()
-        PortConfigDialog(ports, vendor, self, vlan_map=vlan_map).exec_()
+        PortConfigDialog(ports, vendor, self, vlan_map=vlan_map,
+                         preselect=preselect).exec_()
 
     def _backup_config(self):
         raw = self._data.get("raw") or ""
         if not raw:
-            QMessageBox.information(self, "备份配置", "还没有采集到配置，请先「🔌 一键采集」。")
+            info_box(self, "备份配置", "还没有采集到配置，请先「🔌 一键采集」。")
             return
         from PyQt5.QtWidgets import QFileDialog
         import time as _t
@@ -1217,30 +1753,28 @@ class NetworkTopologyPage(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(raw)
-            QMessageBox.information(self, "备份完成", f"已保存到：\n{path}")
+            info_box(self, "备份完成", f"已保存到：\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "备份失败", f"{type(e).__name__}: {e}")
+            from gui.dialogs.base import error_box
+            error_box(self, "备份失败", f"{type(e).__name__}: {e}")
 
     def _ping(self, ip, name="设备"):
         ip = _usable_ip(ip)
         if not ip:
-            QMessageBox.information(self, "Ping", "该设备没有可用的 IP 地址")
+            info_box(self, "Ping", "该设备没有可用的 IP 地址")
             return
         try:
             from gui.tools.ping_tool import PingTestWidget
         except Exception as e:
-            QMessageBox.warning(self, "Ping", f"Ping 工具不可用：{e}")
+            warn_box(self, "Ping", f"Ping 工具不可用：{e}")
             return
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Ping {name}（{ip}）")
-        dlg.setMinimumSize(780, 560)
-        dlg.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        lay = QVBoxLayout(dlg)
-        lay.setContentsMargins(14, 14, 14, 14)
+        dlg = BaseDialog(f"Ping {name}", f"目标：{ip}（连通性验证，只读）",
+                         self, min_width=780, min_height=560)
         w = PingTestWidget()
         if hasattr(w, "host_input"):
             w.host_input.setText(ip)
-        lay.addWidget(w)
+        dlg.add_content(w, 1)
+        dlg.add_close_button()
         dlg.exec_()
 
     def _copy_node(self, node):
@@ -1252,7 +1786,7 @@ class NetworkTopologyPage(QWidget):
 
     def _remove_node(self, node):
         if node is self._sw_node or node is self._pc_node:
-            QMessageBox.information(self, "提示", "交换机与本机节点是采集结果，不能删除")
+            info_box(self, "提示", "交换机与本机节点是采集结果，不能删除")
             return
         for link in list(node.links):
             if link.scene() is not None:

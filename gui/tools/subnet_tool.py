@@ -4,10 +4,10 @@
 网络工具窗口 - 子网计算器
 """
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QTextEdit, QGroupBox,
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+                             QLabel, QLineEdit, QPushButton, QTextEdit, QGroupBox,
                              QComboBox, QSpinBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QTabWidget, QMessageBox)
+                             QHeaderView, QTabWidget)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 
@@ -16,12 +16,14 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from utils.network_tools import SubnetCalculator
+from gui.widget_utils import polish_table, numeric_item
 from gui.tool_styles import (
     TOOL_LABEL_STYLE, TOOL_LABEL_SECONDARY,
     TOOL_BUTTON_PRIMARY, TOOL_BUTTON_GHOST,
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class SubnetCalculatorWidget(QWidget):
@@ -39,39 +41,45 @@ class SubnetCalculatorWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🧮 子网计算器")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         input_group = QGroupBox("子网计算")
         input_layout = QVBoxLayout(input_group)
         input_layout.setSpacing(10)
         
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
+        # 用网格布局而不是横向盒：QHBoxLayout 会按比例压缩 QLabel，
+        # 窗口一窄「掩码/前缀:」就被输入框压住/吃掉（实测截断重叠）
+        row1 = QGridLayout()
+        row1.setHorizontalSpacing(10)
+        row1.setVerticalSpacing(8)
         
         ip_label = QLabel("IP 地址:")
         ip_label.setStyleSheet(TOOL_LABEL_STYLE)
-        row1.addWidget(ip_label)
+        row1.addWidget(ip_label, 0, 0)
         
         self.ip_input = QLineEdit()
         self.ip_input.setPlaceholderText("例如: 192.168.1.100")
         self.ip_input.setText("192.168.1.100")
-        row1.addWidget(self.ip_input)
+        row1.addWidget(self.ip_input, 0, 1)
         
         mask_label = QLabel("掩码/前缀:")
         mask_label.setStyleSheet(TOOL_LABEL_STYLE)
-        row1.addWidget(mask_label)
+        row1.addWidget(mask_label, 0, 2)
         
         self.mask_input = QLineEdit()
         self.mask_input.setPlaceholderText("如: 255.255.255.0 或 24")
         self.mask_input.setText("24")
         self.mask_input.setMaximumWidth(150)
-        row1.addWidget(self.mask_input)
+        row1.addWidget(self.mask_input, 0, 3)
         
-        self.calc_btn = QPushButton("🔢 计算")
+        self.calc_btn = QPushButton("计算")
         self.calc_btn.setStyleSheet(TOOL_BUTTON_PRIMARY)
         self.calc_btn.clicked.connect(self.calculate)
-        row1.addWidget(self.calc_btn)
+        row1.addWidget(self.calc_btn, 0, 4)
+        
+        row1.setColumnStretch(1, 5)
+        row1.setColumnStretch(3, 2)
         
         input_layout.addLayout(row1)
         layout.addWidget(input_group)
@@ -89,44 +97,50 @@ class SubnetCalculatorWidget(QWidget):
         split_layout = QVBoxLayout(split_widget)
         split_layout.setSpacing(10)
         
-        split_row = QHBoxLayout()
-        split_row.setSpacing(8)
+        split_row = QGridLayout()
+        split_row.setHorizontalSpacing(10)
+        split_row.setVerticalSpacing(8)
         
         split_net_label = QLabel("网络地址:")
         split_net_label.setStyleSheet(TOOL_LABEL_STYLE)
-        split_row.addWidget(split_net_label)
+        split_row.addWidget(split_net_label, 0, 0)
         
         self.split_network = QLineEdit("192.168.1.0")
-        split_row.addWidget(self.split_network)
+        split_row.addWidget(self.split_network, 0, 1)
         
         orig_prefix_label = QLabel("原前缀:")
         orig_prefix_label.setStyleSheet(TOOL_LABEL_STYLE)
-        split_row.addWidget(orig_prefix_label)
+        split_row.addWidget(orig_prefix_label, 0, 2)
         
         self.split_orig_prefix = QSpinBox()
         self.split_orig_prefix.setRange(0, 31)
         self.split_orig_prefix.setValue(24)
-        self.split_orig_prefix.setMinimumWidth(70)
-        split_row.addWidget(self.split_orig_prefix)
+        self.split_orig_prefix.setMinimumWidth(80)
+        split_row.addWidget(self.split_orig_prefix, 0, 3)
         
         new_prefix_label = QLabel("新前缀:")
         new_prefix_label.setStyleSheet(TOOL_LABEL_STYLE)
-        split_row.addWidget(new_prefix_label)
+        split_row.addWidget(new_prefix_label, 0, 4)
         
         self.split_new_prefix = QSpinBox()
         self.split_new_prefix.setRange(1, 32)
         self.split_new_prefix.setValue(26)
-        self.split_new_prefix.setMinimumWidth(70)
-        split_row.addWidget(self.split_new_prefix)
+        self.split_new_prefix.setMinimumWidth(80)
+        split_row.addWidget(self.split_new_prefix, 0, 5)
         
-        self.split_btn = QPushButton("📐 划分子网")
+        self.split_btn = QPushButton("划分子网")
         self.split_btn.setStyleSheet(TOOL_BUTTON_PRIMARY)
         self.split_btn.clicked.connect(self.split_subnet)
-        split_row.addWidget(self.split_btn)
+        split_row.addWidget(self.split_btn, 0, 6)
+        
+        split_row.setColumnStretch(1, 4)
+        split_row.setColumnStretch(3, 1)
+        split_row.setColumnStretch(5, 1)
         
         split_layout.addLayout(split_row)
         
         self.split_table = QTableWidget()
+        polish_table(self.split_table, sortable=True)
         self.split_table.setColumnCount(6)
         self.split_table.setHorizontalHeaderLabels(["子网", "掩码", "首主机", "末主机", "广播地址", "主机数"])
         self.split_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -164,6 +178,7 @@ class SubnetCalculatorWidget(QWidget):
         cidr_layout.addLayout(cidr_row)
         
         self.cidr_table = QTableWidget()
+        polish_table(self.cidr_table, sortable=True)
         self.cidr_table.setColumnCount(5)
         self.cidr_table.setHorizontalHeaderLabels(["CIDR", "网络地址", "掩码", "广播地址", "前缀"])
         self.cidr_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -185,6 +200,7 @@ class SubnetCalculatorWidget(QWidget):
         masks_layout.addLayout(masks_header)
         
         self.masks_table = QTableWidget()
+        polish_table(self.masks_table, sortable=True)
         self.masks_table.setColumnCount(4)
         self.masks_table.setHorizontalHeaderLabels(["前缀", "掩码", "总主机数", "可用主机数"])
         self.masks_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -196,7 +212,7 @@ class SubnetCalculatorWidget(QWidget):
         layout.addWidget(tabs)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def calculate(self):
@@ -204,7 +220,7 @@ class SubnetCalculatorWidget(QWidget):
         mask = self.mask_input.text().strip()
         
         if not ip or not mask:
-            QMessageBox.warning(self, "警告", "请输入IP地址和掩码")
+            warn_box(self, "警告", "请输入IP地址和掩码")
             return
         
         result = SubnetCalculator.calculate(ip, mask)
@@ -256,13 +272,15 @@ class SubnetCalculatorWidget(QWidget):
         new_prefix = self.split_new_prefix.value()
         
         if new_prefix <= orig_prefix:
-            QMessageBox.warning(self, "警告", "新前缀必须大于原前缀")
+            warn_box(self, "警告", "新前缀必须大于原前缀")
             return
         
         result = SubnetCalculator.split_subnet(network, orig_prefix, new_prefix)
         
         if result:
             subnets = result
+            # 填表期间关排序（开着会边填边跳行），填完再开
+            self.split_table.setSortingEnabled(False)
             self.split_table.setRowCount(len(subnets))
             
             for i, subnet in enumerate(subnets):
@@ -271,7 +289,10 @@ class SubnetCalculatorWidget(QWidget):
                 self.split_table.setItem(i, 2, QTableWidgetItem(subnet.get('first_host', '-')))
                 self.split_table.setItem(i, 3, QTableWidgetItem(subnet.get('last_host', '-')))
                 self.split_table.setItem(i, 4, QTableWidgetItem(subnet.get('broadcast', '-')))
-                self.split_table.setItem(i, 5, QTableWidgetItem(str(subnet.get('hosts', 0))))
+                # 主机数按数值排序（字符串序会 10 < 2）
+                self.split_table.setItem(i, 5, numeric_item(str(subnet.get('hosts', 0)),
+                                                             subnet.get('hosts', 0)))
+            self.split_table.setSortingEnabled(True)
             
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText(f"✅ 已划分为 {len(subnets)} 个子网")
@@ -287,6 +308,7 @@ class SubnetCalculatorWidget(QWidget):
         
         if result:
             cidrs = result
+            self.cidr_table.setSortingEnabled(False)  # 填表期间关排序
             self.cidr_table.setRowCount(len(cidrs))
             
             for i, cidr in enumerate(cidrs):
@@ -294,7 +316,8 @@ class SubnetCalculatorWidget(QWidget):
                 self.cidr_table.setItem(i, 1, QTableWidgetItem(cidr.get('network', '-')))
                 self.cidr_table.setItem(i, 2, QTableWidgetItem(cidr.get('mask', '-')))
                 self.cidr_table.setItem(i, 3, QTableWidgetItem(cidr.get('broadcast', '-')))
-                self.cidr_table.setItem(i, 4, QTableWidgetItem(f"/{cidr.get('prefix', 0)}"))
+                self.cidr_table.setItem(i, 4, numeric_item(f"/{cidr.get('prefix', 0)}", cidr.get('prefix', 0)))
+            self.cidr_table.setSortingEnabled(True)
             
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText(f"✅ 转换完成，共 {len(cidrs)} 个 CIDR 块")
@@ -305,15 +328,17 @@ class SubnetCalculatorWidget(QWidget):
     def show_all_masks(self):
         masks = SubnetCalculator.get_all_masks()
         
+        self.masks_table.setSortingEnabled(False)  # 填表期间关排序
         self.masks_table.setRowCount(len(masks))
         
         for i, mask in enumerate(masks):
-            prefix_item = QTableWidgetItem(f"/{mask['prefix']}")
+            prefix_item = numeric_item(f"/{mask['prefix']}", mask['prefix'])
             self.masks_table.setItem(i, 0, prefix_item)
             
             self.masks_table.setItem(i, 1, QTableWidgetItem(mask['mask']))
-            self.masks_table.setItem(i, 2, QTableWidgetItem(f"{mask['total_hosts']:,}"))
-            self.masks_table.setItem(i, 3, QTableWidgetItem(f"{mask['usable_hosts']:,}"))
+            self.masks_table.setItem(i, 2, numeric_item(f"{mask['total_hosts']:,}", mask['total_hosts']))
+            self.masks_table.setItem(i, 3, numeric_item(f"{mask['usable_hosts']:,}", mask['usable_hosts']))
+        self.masks_table.setSortingEnabled(True)
         
         self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
         self.status_bar.setText(f"✅ 已显示所有 {len(masks)} 个子网掩码")

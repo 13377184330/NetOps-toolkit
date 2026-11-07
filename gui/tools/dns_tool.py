@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QGroupBox,
                              QComboBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMessageBox, QTabWidget, QFrame)
+                             QHeaderView, QTabWidget, QFrame)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont
 
@@ -22,6 +22,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class DNSToolWidget(QWidget):
@@ -39,7 +40,7 @@ class DNSToolWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🌐 DNS 查询工具集")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         tabs = QTabWidget()
@@ -155,7 +156,7 @@ class DNSToolWidget(QWidget):
         layout.addWidget(tabs)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def do_lookup(self):
@@ -163,7 +164,7 @@ class DNSToolWidget(QWidget):
         record_type = self.record_type.currentText()
         
         if not domain:
-            QMessageBox.warning(self, "警告", "请输入域名")
+            warn_box(self, "警告", "请输入域名")
             return
         
         result = DNSTool.lookup(domain, record_type)
@@ -199,7 +200,7 @@ class DNSToolWidget(QWidget):
         domain = self.domain_input.text().strip()
         
         if not domain:
-            QMessageBox.warning(self, "警告", "请输入域名")
+            warn_box(self, "警告", "请输入域名")
             return
         
         result = DNSTool.lookup_all(domain)
@@ -252,7 +253,7 @@ class DNSToolWidget(QWidget):
         ip = self.reverse_ip.text().strip()
         
         if not ip:
-            QMessageBox.warning(self, "警告", "请输入IP地址")
+            warn_box(self, "警告", "请输入IP地址")
             return
         
         result = DNSTool.reverse_lookup(ip)
@@ -286,7 +287,7 @@ class DNSToolWidget(QWidget):
         domain = self.whois_domain.text().strip()
         
         if not domain:
-            QMessageBox.warning(self, "警告", "请输入域名")
+            warn_box(self, "警告", "请输入域名")
             return
         
         result = WhoisTool.query(domain)
@@ -316,7 +317,7 @@ class NetworkInfoWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🖥️ 网络信息")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         btn_row = QHBoxLayout()
@@ -338,7 +339,7 @@ class NetworkInfoWidget(QWidget):
         layout.addWidget(self.info_text)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
         
         self.refresh_info()
@@ -394,7 +395,7 @@ class IPConverterWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🔄 IP 地址转换")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         decimal_group = QGroupBox("十进制转换")
@@ -479,7 +480,7 @@ class IPConverterWidget(QWidget):
         layout.addWidget(self.result_text)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def dec_to_ip(self):
@@ -491,13 +492,13 @@ class IPConverterWidget(QWidget):
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"请输入有效的十进制数")
+            warn_box(self, "警告", f"请输入有效的十进制数")
     
     def hex_to_ip(self):
         """十六进制转IP"""
         hex_str = self.hex_input.text().strip()
         if not hex_str:
-            QMessageBox.warning(self, "警告", "请输入十六进制数")
+            warn_box(self, "警告", "请输入十六进制数")
             return
         
         result = IPAddressConverter.hex_to_ip(hex_str)
@@ -506,13 +507,13 @@ class IPConverterWidget(QWidget):
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         else:
-            QMessageBox.warning(self, "警告", "请输入有效的十六进制数")
+            warn_box(self, "警告", "请输入有效的十六进制数")
     
     def ip_to_dec(self):
         """IP转十进制"""
         ip = self.ip_input.text().strip()
         if not ip:
-            QMessageBox.warning(self, "警告", "请输入IP地址")
+            warn_box(self, "警告", "请输入IP地址")
             return
         
         result = IPAddressConverter.ip_to_decimal(ip)
@@ -521,13 +522,13 @@ class IPConverterWidget(QWidget):
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         else:
-            QMessageBox.warning(self, "警告", "请输入有效的IP地址")
+            warn_box(self, "警告", "请输入有效的IP地址")
     
     def ip_to_hex(self):
         """IP转十六进制"""
         ip = self.ip_input.text().strip()
         if not ip:
-            QMessageBox.warning(self, "警告", "请输入IP地址")
+            warn_box(self, "警告", "请输入IP地址")
             return
         
         result = IPAddressConverter.ip_to_hex(ip)
@@ -536,4 +537,4 @@ class IPConverterWidget(QWidget):
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         else:
-            QMessageBox.warning(self, "警告", "请输入有效的IP地址")
+            warn_box(self, "警告", "请输入有效的IP地址")

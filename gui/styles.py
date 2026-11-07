@@ -20,10 +20,22 @@ WARNING_HOVER = "#E88E2F"
 BG = "#ECF0F6"            # 窗口底（略深一档，衬托白卡片）
 CARD = "#FFFFFF"          # 卡片底
 BORDER = "#DFE6F0"        # 中性细边
+BORDER_STRONG = "#C9D4E3"  # hover 边
 TEXT = "#1F2A37"          # 主文字
-TEXT_SUB = "#7A8699"      # 次文字
+TEXT_SUB = "#5F6B7A"      # 次文字（#7A8699 在 #ECF0F6 上仅 3.2:1，不达 4.5:1）
+TEXT_MUTED = "#8A95A6"    # 装饰性弱文字（不承载信息时用）
 DISABLED_BG = "#F5F7FA"
 DISABLED_TEXT = "#B3BCCB"
+
+# 图标：QSS 画不出三角形/对勾，用运行时生成的 PNG（见 gui/ui_assets.py）
+from gui.ui_assets import URL_CHEVRON_DOWN, URL_CHEVRON_UP, URL_CHECK_WHITE
+
+# 取不到图标时退化为无图标规则，避免 QSS 出现 url("") 这种空值
+_ARROW_RULE = (
+    f'image: {URL_CHEVRON_DOWN}; width: 12px; height: 8px; margin-right: 10px;'
+    if URL_CHEVRON_DOWN else "image: none;"
+)
+_CHECK_RULE = f'image: {URL_CHECK_WHITE};' if URL_CHECK_WHITE else ""
 
 MODERN_STYLE = f"""
 * {{
@@ -128,6 +140,19 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
     border-radius: 6px;
 }}
 
+/* 上下箭头：样式化按钮后 Qt 不再画原生箭头，必须显式给图，否则按钮是空白块 */
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: {URL_CHEVRON_UP or "none"};
+    width: 10px;
+    height: 7px;
+}}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: {URL_CHEVRON_DOWN or "none"};
+    width: 10px;
+    height: 7px;
+}}
+
 QComboBox {{
     padding: 10px 14px;
     border: 1px solid {BORDER};
@@ -147,6 +172,12 @@ QComboBox:focus {{
     padding: 9px 13px;
 }}
 
+QComboBox:disabled {{
+    background: {DISABLED_BG};
+    border-color: {BORDER};
+    color: {DISABLED_TEXT};
+}}
+
 QComboBox::drop-down {{
     border: none;
     width: 28px;
@@ -154,11 +185,7 @@ QComboBox::drop-down {{
 }}
 
 QComboBox::down-arrow {{
-    image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 6px solid {TEXT_SUB};
-    margin-right: 10px;
+    {_ARROW_RULE}
 }}
 
 QComboBox QAbstractItemView {{
@@ -258,6 +285,18 @@ QPushButton#ghostButton:hover {{
     background: {ACCENT_LIGHT};
 }}
 
+QPushButton#dangerGhostButton {{
+    background: {CARD};
+    border: 1px solid {BORDER};
+    color: {DANGER};
+}}
+
+QPushButton#dangerGhostButton:hover {{
+    background: #FDEEEE;
+    border: 1px solid {DANGER};
+    color: {DANGER_HOVER};
+}}
+
 /* ---------- 列表 / 文本区 ---------- */
 QListWidget {{
     border: 1px solid {BORDER};
@@ -326,6 +365,17 @@ QCheckBox::indicator:hover {{
 }}
 
 QCheckBox::indicator:checked {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+    {_CHECK_RULE}
+}}
+
+QCheckBox::indicator:checked:hover {{
+    background: {ACCENT_HOVER};
+    border-color: {ACCENT_HOVER};
+}}
+
+QCheckBox::indicator:indeterminate {{
     background: {ACCENT};
     border-color: {ACCENT};
 }}
@@ -411,18 +461,18 @@ QSplitter::handle:vertical {{
 QScrollBar:vertical {{
     border: none;
     background: transparent;
-    width: 12px;
-    margin: 2px;
+    width: 10px;
+    margin: 2px 4px 2px 0;
 }}
 
 QScrollBar::handle:vertical {{
-    background: #D3DBE7;
+    background: #CBD5E3;
     min-height: 36px;
-    border-radius: 4px;
+    border-radius: 3px;
 }}
 
 QScrollBar::handle:vertical:hover {{
-    background: #B7C3D4;
+    background: #AEBACB;
 }}
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
@@ -527,13 +577,16 @@ QProgressBar::chunk {{
 }}
 
 QStatusBar {{
-    background: {CARD};
+    /* 原白底会把窗口 12px 圆角切出一个直角（左下角实测），改为透明让圆角透出来 */
+    background: transparent;
     color: {TEXT_SUB};
     font-size: 12px;
-    padding: 8px 14px;
-    border-top: 1px solid {BORDER};
-    border-bottom-left-radius: 12px;
-    border-bottom-right-radius: 12px;
+    padding: 0 8px 4px 8px;
+    border: none;
+}}
+
+QStatusBar::item {{
+    border: none;
 }}
 
 /* ---------- 菜单栏 / 菜单（融合无边框窗口）---------- */
@@ -638,6 +691,40 @@ DIALOG_STYLE = f"""
 QDialog {{
     background: {BG};
     border-radius: 14px;
+}}
+
+/* ---------- 对话框标题/副标题（BaseDialog 统一骨架）---------- */
+QLabel#dlgTitle {{
+    font-size: 17px;
+    font-weight: bold;
+    color: {TEXT};
+    background: transparent;
+}}
+
+QLabel#dlgSubtitle {{
+    font-size: 13px;
+    color: {TEXT_SUB};
+    background: transparent;
+}}
+
+/* ---------- 统一消息框（base.py 的 info/warn/error/question 走这里）---------- */
+QMessageBox {{
+    background: {BG};
+}}
+
+QMessageBox QLabel {{
+    color: {TEXT};
+    font-size: 14px;
+    background: transparent;
+    border: none;
+}}
+
+QMessageBox QPushButton {{
+    min-width: 96px;
+}}
+
+QMessageBox QLabel#qt_msgbox_label {{
+    min-width: 240px;
 }}
 """
 

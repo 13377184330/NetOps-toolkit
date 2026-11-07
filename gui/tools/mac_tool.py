@@ -208,7 +208,7 @@ class MACToolWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("📀 MAC地址查询")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         input_group = QGroupBox("MAC地址查询")
@@ -274,6 +274,8 @@ class MACToolWidget(QWidget):
         result_layout = QVBoxLayout(result_group)
         
         self.result_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.result_table)
         self.result_table.setColumnCount(4)
         self.result_table.setHorizontalHeaderLabels(["MAC地址", "厂商", "国家", "状态"])
         self.result_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
@@ -284,7 +286,7 @@ class MACToolWidget(QWidget):
         layout.addWidget(result_group)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def lookup_mac(self):

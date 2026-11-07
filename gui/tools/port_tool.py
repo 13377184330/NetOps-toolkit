@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QLineEdit, QPushButton, QTextEdit, QGroupBox,
                              QSpinBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QMessageBox, QCheckBox, QComboBox,
+                             QHeaderView, QCheckBox, QComboBox,
                              QTabWidget, QProgressBar)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
@@ -23,6 +23,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR, TOOL_STATUS_WARNING, TOOL_STATUS_INFO,
     apply_tool_style
 )
+from gui.dialogs.base import warn_box
 
 
 class PortScanWorker(QThread):
@@ -77,7 +78,7 @@ class PortScanWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🔍 端口扫描工具")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         tabs = QTabWidget()
@@ -197,10 +198,12 @@ class PortScanWidget(QWidget):
         result_layout.setSpacing(8)
         
         self.stats_label = QLabel("等待扫描...")
-        self.stats_label.setStyleSheet("color: #666666; font-size: 12px;")
+        self.stats_label.setStyleSheet("color: #5F6B7A; font-size: 12px;")
         result_layout.addWidget(self.stats_label)
         
         self.result_table = QTableWidget()
+        from gui.widget_utils import polish_table
+        polish_table(self.result_table)
         self.result_table.setColumnCount(4)
         self.result_table.setHorizontalHeaderLabels(["端口", "状态", "服务", "Banner"])
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -335,7 +338,7 @@ class PortScanWidget(QWidget):
         layout.addWidget(tabs)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
     
     def on_scan_type_changed(self, index):
@@ -356,7 +359,7 @@ class PortScanWidget(QWidget):
         host = self.host_input.text().strip()
         
         if not host:
-            QMessageBox.warning(self, "警告", "请输入目标主机")
+            warn_box(self, "警告", "请输入目标主机")
             return
         
         scan_types = ["common", "quick", "range", "full"]
@@ -438,7 +441,7 @@ class PortScanWidget(QWidget):
         port = self.quick_port.value()
         
         if not host:
-            QMessageBox.warning(self, "警告", "请输入目标主机")
+            warn_box(self, "警告", "请输入目标主机")
             return
         
         result = PortScanner.test_port(host, port, 2.0)
@@ -476,17 +479,17 @@ class PortScanWidget(QWidget):
         ports_text = self.batch_ports.text().strip()
         
         if not host:
-            QMessageBox.warning(self, "警告", "请输入目标主机")
+            warn_box(self, "警告", "请输入目标主机")
             return
         
         if not ports_text:
-            QMessageBox.warning(self, "警告", "请输入端口列表")
+            warn_box(self, "警告", "请输入端口列表")
             return
         
         try:
             ports = [int(p.strip()) for p in ports_text.split(',') if p.strip()]
         except ValueError:
-            QMessageBox.warning(self, "警告", "端口格式错误，请输入数字")
+            warn_box(self, "警告", "端口格式错误，请输入数字")
             return
         
         txt = f"{'─' * 50}\n📋 批量端口检测结果\n{'─' * 50}\n📡 主机: {host}\n{'─' * 50}\n\n"
@@ -508,7 +511,7 @@ class PortScanWidget(QWidget):
     
     def export_results(self):
         if self.result_table.rowCount() == 0:
-            QMessageBox.warning(self, "警告", "没有可导出的结果")
+            warn_box(self, "警告", "没有可导出的结果")
             return
         
         from PyQt5.QtWidgets import QApplication

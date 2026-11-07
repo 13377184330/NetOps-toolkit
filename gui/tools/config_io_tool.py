@@ -5,7 +5,7 @@
 """
 
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QTextEdit, QPushButton, QGroupBox, QMessageBox,
+                             QTextEdit, QPushButton, QGroupBox,
                              QFileDialog, QComboBox, QCheckBox, QLineEdit)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
@@ -18,6 +18,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR, TOOL_STATUS_WARNING,
     apply_tool_style
 )
+from gui.dialogs.base import info_box, warn_box, error_box
 
 
 class ConfigIOWidget(QWidget):
@@ -235,7 +236,7 @@ class ConfigIOWidget(QWidget):
     def export_config(self):
         """导出配置到文件"""
         if not self.config_text.toPlainText():
-            QMessageBox.warning(self, "警告", "没有可导出的配置")
+            warn_box(self, "警告", "没有可导出的配置")
             return
         
         format_idx = self.export_format.currentIndex()
@@ -249,11 +250,11 @@ class ConfigIOWidget(QWidget):
             try:
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.config_text.toPlainText())
-                QMessageBox.information(self, "成功", f"配置已导出到:\n{file_path}")
+                info_box(self, "成功", f"配置已导出到:\n{file_path}")
                 self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
                 self.status_bar.setText(f"✅ 已导出到: {os.path.basename(file_path)}")
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"导出失败: {str(e)}")
+                error_box(self, "错误", f"导出失败: {str(e)}")
                 self.status_bar.setStyleSheet(TOOL_STATUS_ERROR)
                 self.status_bar.setText(f"❌ 导出失败")
     
@@ -286,11 +287,11 @@ class ConfigIOWidget(QWidget):
                 else:
                     self.config_text.setPlainText(content)
                 
-                QMessageBox.information(self, "成功", "配置导入成功")
+                info_box(self, "成功", "配置导入成功")
                 self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
                 self.status_bar.setText(f"✅ 已导入: {os.path.basename(file_path)}")
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"导入失败: {str(e)}")
+                error_box(self, "错误", f"导入失败: {str(e)}")
                 self.status_bar.setStyleSheet(TOOL_STATUS_ERROR)
                 self.status_bar.setText(f"❌ 导入失败")
     
@@ -304,7 +305,7 @@ class ConfigIOWidget(QWidget):
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 已从剪贴板导入")
         else:
-            QMessageBox.warning(self, "警告", "剪贴板为空")
+            warn_box(self, "警告", "剪贴板为空")
             self.status_bar.setStyleSheet(TOOL_STATUS_WARNING)
             self.status_bar.setText("⚠️ 剪贴板为空")
     
@@ -313,7 +314,7 @@ class ConfigIOWidget(QWidget):
         text = self.config_text.toPlainText()
         
         if not text:
-            QMessageBox.warning(self, "警告", "请先输入或导入配置")
+            warn_box(self, "警告", "请先输入或导入配置")
             return
         
         result = f"""配置分析结果:

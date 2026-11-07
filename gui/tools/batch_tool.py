@@ -7,9 +7,10 @@ import os
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
-                             QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget)
+                             QPushButton, QTextEdit, QVBoxLayout, QWidget)
 
 from modules import batch_gen
+from gui.dialogs.base import info_box, error_box
 
 DEMO_IFACE = """接口,模式,VLAN,描述
 GE1/0/1,access,10,前台电脑
@@ -141,7 +142,7 @@ class BatchWidget(QWidget):
                     continue
             self.stat_label.setText(f"已导入：{os.path.basename(path)}")
         except Exception as e:
-            QMessageBox.critical(self, "导入失败", f"{type(e).__name__}: {e}")
+            error_box(self, "导入失败", f"{type(e).__name__}: {e}")
 
     def generate(self):
         text = self.input_view.toPlainText().strip()
@@ -206,7 +207,7 @@ class BatchWidget(QWidget):
     def export(self):
         text = self._plain_text()
         if not text:
-            QMessageBox.information(self, "导出", "请先生成配置")
+            info_box(self, "导出", "请先生成配置")
             return
         if self._devices:
             # 批量设备：每台一个 .cfg 文件
@@ -218,9 +219,9 @@ class BatchWidget(QWidget):
                     safe = "".join(ch for ch in d["name"] if ch not in r'\/:*?"<>|')
                     with open(os.path.join(folder, f"{safe}.cfg"), "w", encoding="utf-8") as f:
                         f.write(batch_gen.to_plain(d["lines"]))
-                QMessageBox.information(self, "导出完成", f"已导出 {len(self._devices)} 个文件到：\n{folder}")
+                info_box(self, "导出完成", f"已导出 {len(self._devices)} 个文件到：\n{folder}")
             except Exception as e:
-                QMessageBox.critical(self, "导出失败", f"{type(e).__name__}: {e}")
+                error_box(self, "导出失败", f"{type(e).__name__}: {e}")
         else:
             path, _ = QFileDialog.getSaveFileName(self, "导出配置", "batch_config.cfg",
                                                   "配置文件 (*.cfg);;文本 (*.txt)")
@@ -229,6 +230,6 @@ class BatchWidget(QWidget):
             try:
                 with open(path, "w", encoding="utf-8") as f:
                     f.write(text)
-                QMessageBox.information(self, "导出完成", f"已保存到：\n{path}")
+                info_box(self, "导出完成", f"已保存到：\n{path}")
             except Exception as e:
-                QMessageBox.critical(self, "导出失败", f"{type(e).__name__}: {e}")
+                error_box(self, "导出失败", f"{type(e).__name__}: {e}")

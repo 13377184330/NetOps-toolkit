@@ -40,7 +40,7 @@ class PasswordGeneratorWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         
         title_label = QLabel("🔐 密码生成器")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; padding: 5px 0;")
+        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; padding: 5px 0;")
         layout.addWidget(title_label)
         
         result_group = QGroupBox("生成的密码")
@@ -87,7 +87,7 @@ class PasswordGeneratorWidget(QWidget):
         len_row.addWidget(self.length_slider)
         
         self.length_display = QLabel("16")
-        self.length_display.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2; min-width: 30px;")
+        self.length_display.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF; min-width: 30px;")
         len_row.addWidget(self.length_display)
         
         settings_layout.addLayout(len_row)
@@ -191,7 +191,7 @@ class PasswordGeneratorWidget(QWidget):
         layout.addWidget(self.strength_label)
         
         self.status_bar = QLabel("就绪")
-        self.status_bar.setStyleSheet("color: #666666; padding: 5px; font-size: 12px;")
+        self.status_bar.setStyleSheet("color: #5F6B7A; padding: 5px; font-size: 12px;")
         layout.addWidget(self.status_bar)
         
         self.generate_password()
@@ -278,7 +278,7 @@ class PasswordGeneratorWidget(QWidget):
             color = "#4ade80"
         else:
             strength_text = "🔒 高安全"
-            color = "#22c55e"
+            color = "#34C759"
         
         entropy = len(set(password)) * len(password)
         self.strength_label.setStyleSheet(f"color: {color}; padding: 5px; font-size: 12px;")

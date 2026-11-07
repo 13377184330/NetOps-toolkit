@@ -6,9 +6,10 @@ import html as _html
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QComboBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-                             QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget)
+                             QPushButton, QTextEdit, QVBoxLayout, QWidget)
 
 from modules import onboard
+from gui.dialogs.base import info_box, error_box
 
 
 class OnboardWidget(QWidget):
@@ -123,7 +124,7 @@ class OnboardWidget(QWidget):
 
     def export(self):
         if not self._lines:
-            QMessageBox.information(self, "导出", "请先生成配置")
+            info_box(self, "导出", "请先生成配置")
             return
         from PyQt5.QtWidgets import QFileDialog
         safe = "".join(ch for ch in (self._edits["name"].text() or "switch")
@@ -135,6 +136,6 @@ class OnboardWidget(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("\n".join(c for c, _ in self._lines))
-            QMessageBox.information(self, "导出完成", f"已保存到：\n{path}")
+            info_box(self, "导出完成", f"已保存到：\n{path}")
         except Exception as e:
-            QMessageBox.critical(self, "导出失败", f"{type(e).__name__}: {e}")
+            error_box(self, "导出失败", f"{type(e).__name__}: {e}")

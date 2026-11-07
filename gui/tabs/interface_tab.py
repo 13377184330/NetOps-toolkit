@@ -7,8 +7,9 @@ NetOps Toolkit - 接口配置标签页
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QLineEdit, QSpinBox, QCheckBox, QGroupBox,
                              QComboBox, QPushButton, QListWidget, QLabel,
-                             QMessageBox, QScrollArea, QFrame)
+                             QScrollArea, QFrame)
 from PyQt5.QtCore import Qt
+from gui.dialogs.base import warn_box
 from modules.interface_config import InterfaceConfigGenerator
 
 
@@ -264,12 +265,12 @@ class InterfaceConfigTab(QWidget):
         members_str = self.trunk_members.text().strip()
         
         if not members_str:
-            QMessageBox.warning(self, "警告", "请输入成员端口！")
+            warn_box(self, "警告", "请输入成员端口！")
             return
         
         for t in self.eth_trunks:
             if t["trunk_id"] == trunk_id:
-                QMessageBox.warning(self, "警告", f"Eth-Trunk{trunk_id} 已存在！")
+                warn_box(self, "警告", f"Eth-Trunk{trunk_id} 已存在！")
                 return
         
         members = [m.strip() for m in members_str.split(",")]
@@ -309,7 +310,7 @@ class InterfaceConfigTab(QWidget):
     def add_poe_interface(self):
         interface = self.poe_interface.text().strip()
         if not interface:
-            QMessageBox.warning(self, "警告", "请输入接口名称！")
+            warn_box(self, "警告", "请输入接口名称！")
             return
         
         poe_data = {
@@ -333,7 +334,7 @@ class InterfaceConfigTab(QWidget):
     def add_rate_limit(self):
         interface = self.rate_interface.text().strip()
         if not interface:
-            QMessageBox.warning(self, "警告", "请输入接口名称！")
+            warn_box(self, "警告", "请输入接口名称！")
             return
         
         rate_data = {

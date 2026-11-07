@@ -7,13 +7,15 @@
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QPushButton, QTextEdit, QLabel,
-                             QMessageBox, QFileDialog, QSplitter, QStatusBar,
+                             QFileDialog, QSplitter, QStatusBar,
                              QDialog, QListWidget, QDialogButtonBox, QMenu, QAction,
                              QComboBox, QMenuBar)
 from PyQt5.QtCore import Qt, QPoint, QEvent, QObject
-from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication
+from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication, QPalette
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
+from gui.dialogs.base import info_box, warn_box, error_box, question_box
+from gui import theme
 from gui.title_bar import FramelessTitleBar
 from gui.side_nav import _SideNavWidget
 from gui.tabs.basic_tab import BasicConfigTab
@@ -169,7 +171,7 @@ class TemplateDialog(QDialog):
     def initUI(self):
         self.setWindowTitle(f"选择{VENDOR_CN.get(self.device_type, '')}配置模板")
         self.setFixedSize(500, 400)
-        self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         
         layout = QVBoxLayout(self)
         
@@ -320,7 +322,7 @@ class MainWindow(QMainWindow):
 
         # 命令释义开关（对标 NetCMD）：并肩显示每条命令的中文说明，降低门槛；
         # 注释仅用于阅读，复制/导出/下发永远走纯命令
-        self.comment_btn = QPushButton("💡 命令释义")
+        self.comment_btn = QPushButton("命令释义")
         self.comment_btn.setObjectName("ghostButton")
         self.comment_btn.setCheckable(True)
         self.comment_btn.setChecked(True)
@@ -342,13 +344,17 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(generate_btn)
         
         clear_btn = QPushButton("清空")
-        clear_btn.setObjectName("dangerButton")
+        # 原来是实心红 dangerButton：和主按钮「生成配置」并排，视觉重量压过主操作，
+        # 误触代价又高。改为红色描边的次级按钮，危险语义保留、不再抢视线。
+        clear_btn.setObjectName("dangerGhostButton")
         clear_btn.setToolTip("清空所有配置项")
         clear_btn.clicked.connect(self.clear_config)
         button_layout.addWidget(clear_btn)
         
         # 预览区折叠按钮：窄屏时收起给左侧表单让位（QQ管家式侧栏收纳）
-        self.toggle_preview_btn = QPushButton("⟩ 收起预览")
+        # 不用 ⟩/⟨ 这类字符：Microsoft YaHei UI 下 U+27E9 会渲染成全角右括号"）"，
+        # 按钮看起来像"）收起预览"，实测很怪。纯文字最稳。
+        self.toggle_preview_btn = QPushButton("收起预览")
         self.toggle_preview_btn.setObjectName("ghostButton")
         self.toggle_preview_btn.setToolTip("收起/展开右侧配置预览区，收起后左侧表单区更宽")
         self.toggle_preview_btn.setCursor(QCursor(Qt.PointingHandCursor))
@@ -368,17 +374,18 @@ class MainWindow(QMainWindow):
         preview_header = QHBoxLayout()
         preview_label = QLabel("配置预览")
         preview_label.setStyleSheet("""
-            font-size: 18px;
+            font-size: 15px;
             font-weight: bold;
             color: #1F2A37;
-            padding: 4px;
+            padding: 2px;
         """)
         preview_header.addWidget(preview_label)
         
         preview_header.addStretch()
         
         self.info_label = QLabel("")
-        self.info_label.setStyleSheet("font-size: 12px; color: rgba(224, 224, 224, 0.7);")
+        # 原 rgba(224,224,224,.7) 是浅色字，放在浅底上几乎看不见（实测对比度 <1.5:1）
+        self.info_label.setStyleSheet("font-size: 12px; color: #5F6B7A;")
         preview_header.addWidget(self.info_label)
         
         right_layout.addLayout(preview_header)
@@ -398,6 +405,10 @@ class MainWindow(QMainWindow):
             selection-color: #ffffff;
         """)
         self.preview_text.setPlaceholderText("← 在左侧填写参数，点击「生成配置」后，完整配置将在这里输出\n\n生成的配置可直接复制上设备，或用「设备运维」页下发到真机")
+        # 深色底上的占位文字：全局 placeholder 色是给浅底用的，在 #1E2430 上太暗
+        _pal = self.preview_text.palette()
+        _pal.setColor(QPalette.PlaceholderText, QColor("#8FA0B8"))
+        self.preview_text.setPalette(_pal)
         self.preview_text.textChanged.connect(self.update_info)
         right_layout.addWidget(self.preview_text, 1)
         
@@ -432,7 +443,10 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(content_splitter, 1)
         
         self.statusBar().showMessage("就绪 | 点击「网络工具」菜单使用网络工具箱")
+        self._toggle_comments(self.comment_btn.isChecked())  # 初始化"命令释义"开态的可见样式
         self._apply_form_layout_polish()
+        # 无边框窗口底色是 paintEvent 手绘的：主题切换后主动重绘
+        theme.on_change(self.update)
 
     def _restore_geometry(self):
         """从 settings 恢复上次窗口尺寸（用户拖过的尺寸优先于默认值）"""
@@ -486,8 +500,11 @@ class MainWindow(QMainWindow):
 
     def _toggle_comments(self, checked: bool):
         """命令释义开关：切换预览渲染方式"""
+        # 开关的"开"态必须有可见反馈：原来只在 toggled 时设样式，
+        # 启动时默认就是选中态，却看不出已开启（一个隐形的开关）
         self.comment_btn.setStyleSheet(
-            "QPushButton:checked { color: #0089FF; border-color: #0089FF; }")
+            "QPushButton:checked { color: #0089FF; border-color: #0089FF;"
+            " background: #EAF4FF; }")
         self._render_preview()
 
     def _render_preview(self):
@@ -506,10 +523,10 @@ class MainWindow(QMainWindow):
         """折叠/展开右侧配置预览区"""
         if self.right_widget.isVisible():
             self.right_widget.hide()
-            self.toggle_preview_btn.setText("⟨ 展开")
+            self.toggle_preview_btn.setText("展开预览")
         else:
             self.right_widget.show()
-            self.toggle_preview_btn.setText("⟩ 收起")
+            self.toggle_preview_btn.setText("收起预览")
 
     def _apply_form_layout_polish(self):
         """统一打磨全窗口表单与卡片（一处代码覆盖所有 tab）：
@@ -543,12 +560,13 @@ class MainWindow(QMainWindow):
                 if item is not None and isinstance(item.widget(), QLabel):
                     item.widget().setFixedWidth(label_width)
 
-        # 3) 卡片轻阴影
+        # 3) 卡片轻阴影（深色主题下用黑影，浅色保持墨色淡影）
         for group in self.findChildren(QGroupBox):
             shadow = QGraphicsDropShadowEffect(self)
             shadow.setBlurRadius(22)
             shadow.setOffset(0, 3)
-            shadow.setColor(QColor(31, 42, 55, 28))  # 墨色 11% 透明度
+            shadow.setColor(QColor(0, 0, 0, 90) if theme.is_dark()
+                            else QColor(31, 42, 55, 28))  # 墨色 11% 透明度
             group.setGraphicsEffect(shadow)
 
         # 4) 卡片折叠化（信息分层）：点标题收起/展开，每个 tab 默认只展开第一张卡片
@@ -573,7 +591,7 @@ class MainWindow(QMainWindow):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(BG))
+        painter.setBrush(theme.qcolor("bg"))
         radius = 12 if not self.isMaximized() else 0
         painter.drawRoundedRect(0, 0, self.width(), self.height(), radius, radius)
 
@@ -899,8 +917,8 @@ class MainWindow(QMainWindow):
             dialog.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
             
             layout = QVBoxLayout(dialog)
-            layout.setContentsMargins(15, 15, 15, 15)
-            layout.setSpacing(10)
+            layout.setContentsMargins(22, 20, 22, 18)
+            layout.setSpacing(14)
             widget = tool_widgets[tool_name]()
             layout.addWidget(widget)
             
@@ -960,16 +978,14 @@ class MainWindow(QMainWindow):
             template_config = H3C_TEMPLATES.get(template_name, {}).get("config", {})
         
         if not template_config:
-            QMessageBox.warning(self, "警告", f"模板 {template_name} 不存在！")
+            warn_box(self, "警告", f"模板 {template_name} 不存在！")
             return
         
-        reply = QMessageBox.question(
+        if question_box(
             self, "加载模板",
             f"确定要加载模板 \"{template_name}\" 吗？\n这将覆盖当前所有配置。",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
+            ok="是", cancel="否"
+        ):
             for tab in self.tabs.values():
                 tab.clear_config()
             
@@ -996,7 +1012,7 @@ class MainWindow(QMainWindow):
                     basic_tab.privilege_level.setValue(user.get("level", 15))
             
             self.statusBar().showMessage(f"已加载模板: {template_name}", 5000)
-            QMessageBox.information(self, "成功", f"模板 \"{template_name}\" 已加载！")
+            info_box(self, "成功", f"模板 \"{template_name}\" 已加载！")
     
     def validate_config(self):
         errors = []
@@ -1022,10 +1038,10 @@ class MainWindow(QMainWindow):
         
         if errors:
             error_msg = "配置验证失败：\n\n" + "\n".join(f"• {e}" for e in errors)
-            QMessageBox.warning(self, "验证失败", error_msg)
+            warn_box(self, "验证失败", error_msg)
             self.statusBar().showMessage(f"验证失败: {len(errors)} 个错误", 5000)
         else:
-            QMessageBox.information(self, "验证通过", "所有配置参数格式正确！")
+            info_box(self, "验证通过", "所有配置参数格式正确！")
             self.statusBar().showMessage("验证通过", 3000)
     
     def generate_config(self):
@@ -1063,7 +1079,7 @@ class MainWindow(QMainWindow):
             all_config.append(adv_config)
         
         if not all_config:
-            QMessageBox.warning(self, "警告", "请至少配置一个模块！")
+            warn_box(self, "警告", "请至少配置一个模块！")
             return
         
         full_config = "\n".join(all_config)
@@ -1082,12 +1098,12 @@ class MainWindow(QMainWindow):
         self._clean_config = header + full_config
         self._render_preview()
         self.statusBar().showMessage("配置生成成功！", 3000)
-        QMessageBox.information(self, "成功", "配置生成成功！")
+        info_box(self, "成功", "配置生成成功！")
     
     def export_config(self):
         config_text = self._clean_config or self.preview_text.toPlainText()
         if not config_text:
-            QMessageBox.warning(self, "警告", "请先生成配置！")
+            warn_box(self, "警告", "请先生成配置！")
             return
         
         default_name = f"{self.current_device_type}_switch_config.txt"
@@ -1101,14 +1117,14 @@ class MainWindow(QMainWindow):
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(config_text)
                 self.statusBar().showMessage(f"配置已导出到: {file_path}", 5000)
-                QMessageBox.information(self, "成功", f"配置已导出到：\n{file_path}")
+                info_box(self, "成功", f"配置已导出到：\n{file_path}")
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"导出失败：\n{str(e)}")
+                error_box(self, "错误", f"导出失败：\n{str(e)}")
     
     def copy_to_clipboard(self):
         config_text = self._clean_config or self.preview_text.toPlainText()
         if not config_text:
-            QMessageBox.warning(self, "警告", "请先生成配置！")
+            warn_box(self, "警告", "请先生成配置！")
             return
         
         from PyQt5.QtWidgets import QApplication
@@ -1117,15 +1133,13 @@ class MainWindow(QMainWindow):
         
         msg = "配置已复制到剪贴板（纯命令，注释不包含，可直接粘贴设备）"
         self.statusBar().showMessage(msg, 4000)
-        QMessageBox.information(self, "成功", msg + "！")
+        info_box(self, "成功", msg + "！")
     
     def clear_config(self):
-        reply = QMessageBox.question(
+        if question_box(
             self, "确认", "确定要清空所有配置吗？",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
+            ok="是", cancel="否"
+        ):
             for tab in self.tabs.values():
                 tab.clear_config()
             self.preview_text.clear()
@@ -1154,7 +1168,7 @@ class MainWindow(QMainWindow):
             self.tabs["interface"].load_config(config["interface"])
         
         self.statusBar().showMessage(f"已应用模板: {template_data.get('name', '')}", 5000)
-        QMessageBox.information(self, "成功", f"模板 '{template_data.get('name', '')}' 已应用！")
+        info_box(self, "成功", f"模板 '{template_data.get('name', '')}' 已应用！")
     
     def save_as_template(self):
         from gui.dialogs.template_dialog import SaveTemplateDialog
@@ -1198,9 +1212,9 @@ class MainWindow(QMainWindow):
         if file_path:
             manager = TemplateManager()
             if manager.import_template(file_path):
-                QMessageBox.information(self, "成功", "模板导入成功！")
+                info_box(self, "成功", "模板导入成功！")
             else:
-                QMessageBox.warning(self, "失败", "导入模板失败，请检查文件格式。")
+                warn_box(self, "失败", "导入模板失败，请检查文件格式。")
     
     def export_current_template(self):
         from utils.template_manager import TemplateManager
@@ -1226,17 +1240,18 @@ class MainWindow(QMainWindow):
             )
             # 全量测试修复：当前表单模板尚未存入注册表，须用导出对象方法（原按名查表必失败）
             if manager.export_template_object(template, file_path):
-                QMessageBox.information(self, "成功", "模板导出成功！")
+                info_box(self, "成功", "模板导出成功！")
             else:
-                QMessageBox.warning(self, "失败", "导出模板失败。")
+                warn_box(self, "失败", "导出模板失败。")
 
 
 
 class _GroupCollapser(QObject):
     """QGroupBox 折叠管理器：点击标题区切换收起/展开（不改动各 tab 源码）"""
 
-    COLLAPSED_MARK = " ▸"
-    EXPANDED_MARK = " ▾"
+    # 箭头放标题左侧：右侧箭头会被误读成"更多操作"，且中文标题宽度不一导致箭头不对齐
+    COLLAPSED_MARK = "▸ "
+    EXPANDED_MARK = "▾ "
     TITLE_ZONE = 40  # QSS 中标题位于 padding 顶部 36px 区，点击命中判定线
     COLLAPSED_HEIGHT = 44
 
@@ -1276,8 +1291,8 @@ class _GroupCollapser(QObject):
             self.expand(group)
 
     def _set_title(self, group, mark):
-        base = group.title().replace(self.COLLAPSED_MARK, "").replace(self.EXPANDED_MARK, "")
-        group.setTitle(base + mark)
+        base = group.title().replace("▸", "").replace("▾", "").strip()
+        group.setTitle(mark + base)
 
     # ---- 事件过滤：标题区点击 ----
     def eventFilter(self, obj, event):

@@ -7,7 +7,7 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QListWidget, QListWidgetItem,
                               QTextEdit, QLineEdit, QComboBox, QTabWidget,
-                              QWidget, QMessageBox, QFileDialog, QGroupBox,
+                              QWidget, QFileDialog, QGroupBox,
                               QCheckBox, QInputDialog, QSplitter)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
@@ -16,7 +16,8 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from gui.styles import MODERN_STYLE, DIALOG_STYLE
+from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
+from gui.dialogs.base import info_box, warn_box, question_box
 from utils.template_manager import TemplateManager, Template
 
 
@@ -36,7 +37,7 @@ class TemplateManagerDialog(QDialog):
     def initUI(self):
         self.setWindowTitle("模板管理器")
         self.setMinimumSize(900, 600)
-        self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -45,7 +46,7 @@ class TemplateManagerDialog(QDialog):
         header.setStyleSheet("""
             font-size: 20px;
             font-weight: bold;
-            color: #1976D2;
+            color: #0089FF;
             padding: 10px;
         """)
         layout.addWidget(header)
@@ -80,7 +81,7 @@ class TemplateManagerDialog(QDialog):
         left_layout.setContentsMargins(0, 0, 0, 0)
         
         list_header = QLabel("模板列表")
-        list_header.setStyleSheet("font-weight: bold; color: #333;")
+        list_header.setStyleSheet("font-weight: bold; color: #1F2A37;")
         left_layout.addWidget(list_header)
         
         self.template_list = QListWidget()
@@ -118,7 +119,7 @@ class TemplateManagerDialog(QDialog):
         
         form_layout.addWidget(QLabel("设备:"))
         self.device_label = QLabel()
-        self.device_label.setStyleSheet("color: #1976D2; font-weight: bold;")
+        self.device_label.setStyleSheet("color: #0089FF; font-weight: bold;")
         form_layout.addWidget(self.device_label)
         form_layout.addStretch()
         info_layout.addLayout(form_layout)
@@ -131,7 +132,7 @@ class TemplateManagerDialog(QDialog):
         
         info_layout.addWidget(QLabel("标签:"))
         self.tags_label = QLabel()
-        self.tags_label.setStyleSheet("color: #666;")
+        self.tags_label.setStyleSheet("color: #5F6B7A;")
         info_layout.addWidget(self.tags_label)
         
         info_layout.addWidget(QLabel("配置预览:"))
@@ -300,28 +301,26 @@ class TemplateManagerDialog(QDialog):
             )
             
             if self.template_manager.save_template(template):
-                QMessageBox.information(self, "成功", f"模板 '{name}' 创建成功！")
+                info_box(self, "成功", f"模板 '{name}' 创建成功！")
                 self.load_templates()
             else:
-                QMessageBox.warning(self, "失败", "创建模板失败，名称可能已存在。")
+                warn_box(self, "失败", "创建模板失败，名称可能已存在。")
     
     def delete_template(self):
         if not self.current_template:
             return
         
         if self.current_template.is_builtin:
-            QMessageBox.warning(self, "无法删除", "内置模板不能删除！")
+            warn_box(self, "无法删除", "内置模板不能删除！")
             return
         
-        reply = QMessageBox.question(
+        if question_box(
             self, "确认删除",
             f"确定要删除模板 '{self.current_template.name}' 吗？",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
+            ok="是", cancel="否"
+        ):
             if self.template_manager.delete_template(self.current_template.name, self.current_template.device_type):
-                QMessageBox.information(self, "成功", "模板已删除！")
+                info_box(self, "成功", "模板已删除！")
                 self.load_templates()
     
     def duplicate_template(self):
@@ -338,7 +337,7 @@ class TemplateManagerDialog(QDialog):
             if self.template_manager.duplicate_template(
                 self.current_template.name, self.current_template.device_type, new_name
             ):
-                QMessageBox.information(self, "成功", f"模板已复制为 '{new_name}'！")
+                info_box(self, "成功", f"模板已复制为 '{new_name}'！")
                 self.load_templates()
     
     def import_template(self):
@@ -348,14 +347,14 @@ class TemplateManagerDialog(QDialog):
         
         if file_path:
             if self.template_manager.import_template(file_path):
-                QMessageBox.information(self, "成功", "模板导入成功！")
+                info_box(self, "成功", "模板导入成功！")
                 self.load_templates()
             else:
-                QMessageBox.warning(self, "失败", "导入模板失败，请检查文件格式。")
+                warn_box(self, "失败", "导入模板失败，请检查文件格式。")
     
     def export_template(self):
         if not self.current_template:
-            QMessageBox.warning(self, "提示", "请先选择一个模板！")
+            warn_box(self, "提示", "请先选择一个模板！")
             return
         
         file_path, _ = QFileDialog.getSaveFileName(
@@ -368,7 +367,7 @@ class TemplateManagerDialog(QDialog):
             if self.template_manager.export_template(
                 self.current_template.name, self.current_template.device_type, file_path
             ):
-                QMessageBox.information(self, "成功", "模板导出成功！")
+                info_box(self, "成功", "模板导出成功！")
     
     def save_edited_template(self):
         if not self.current_template:
@@ -379,7 +378,7 @@ class TemplateManagerDialog(QDialog):
         try:
             config = json.loads(self.edit_config.toPlainText())
         except json.JSONDecodeError:
-            QMessageBox.warning(self, "错误", "配置JSON格式错误！")
+            warn_box(self, "错误", "配置JSON格式错误！")
             return
         
         new_name = self.edit_name.text().strip()
@@ -395,7 +394,7 @@ class TemplateManagerDialog(QDialog):
         self.current_template.tags = [t.strip() for t in self.edit_tags.text().split(",") if t.strip()]
         
         if self.template_manager.save_template(self.current_template):
-            QMessageBox.information(self, "成功", "模板保存成功！")
+            info_box(self, "成功", "模板保存成功！")
             self.load_templates()
     
     def cancel_edit(self):
@@ -409,7 +408,7 @@ class TemplateManagerDialog(QDialog):
     
     def use_template(self):
         if not self.current_template:
-            QMessageBox.warning(self, "提示", "请先选择一个模板！")
+            warn_box(self, "提示", "请先选择一个模板！")
             return
         
         self.template_selected.emit({
@@ -433,13 +432,13 @@ class SaveTemplateDialog(QDialog):
     def initUI(self):
         self.setWindowTitle("保存为模板")
         self.setFixedSize(450, 350)
-        self.setStyleSheet(MODERN_STYLE + DIALOG_STYLE)
+        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
         
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         
         header = QLabel("💾 保存配置为模板")
-        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976D2;")
+        header.setStyleSheet("font-size: 18px; font-weight: bold; color: #0089FF;")
         layout.addWidget(header)
         
         form_layout = QVBoxLayout()
@@ -490,7 +489,7 @@ class SaveTemplateDialog(QDialog):
     def save_template(self):
         name = self.name_input.text().strip()
         if not name:
-            QMessageBox.warning(self, "错误", "请输入模板名称！")
+            warn_box(self, "错误", "请输入模板名称！")
             return
         
         template = Template(
@@ -503,7 +502,7 @@ class SaveTemplateDialog(QDialog):
         )
         
         if self.template_manager.save_template(template):
-            QMessageBox.information(self, "成功", f"模板 '{name}' 保存成功！")
+            info_box(self, "成功", f"模板 '{name}' 保存成功！")
             self.accept()
         else:
-            QMessageBox.warning(self, "失败", "保存模板失败，名称可能已存在。")
+            warn_box(self, "失败", "保存模板失败，名称可能已存在。")

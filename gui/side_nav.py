@@ -12,30 +12,35 @@ from PyQt5.QtWidgets import (QWidget, QHBoxLayout, QListWidget,
                              QListWidgetItem, QStackedWidget)
 from PyQt5.QtCore import pyqtSignal, Qt
 
-NAV_QSS = """
-#sideNav {
+from gui.styles import ACCENT, BORDER, TEXT, TEXT_SUB, BG
+
+# 注意：全局 QSS 里 QListWidget::item 带 border-bottom + 圆角，导航项会因此
+# 显出一圈"幽灵描边"（实测截图每项像套了个浅灰小方框），这里必须显式清零。
+NAV_QSS = f"""
+#sideNav {{
     background: #FFFFFF;
-    border: 1px solid #E5EAF2;
+    border: 1px solid {BORDER};
     border-radius: 14px;
     padding: 8px 6px;
     outline: none;
-}
-#sideNav::item {
-    color: #5A6B7B;
-    padding: 12px 16px;
-    margin: 3px 4px;
+}}
+#sideNav::item {{
+    color: {TEXT_SUB};
+    padding: 12px 14px;
+    margin: 3px 2px;
+    border: none;
     border-radius: 10px;
     font-weight: bold;
     font-size: 13px;
-}
-#sideNav::item:selected {
-    background: #0089FF;
-    color: #ffffff;
-}
-#sideNav::item:hover:!selected {
-    background: #E8EDF5;
-    color: #1F2A37;
-}
+}}
+#sideNav::item:selected {{
+    background: {ACCENT};
+    color: #FFFFFF;
+}}
+#sideNav::item:hover:!selected {{
+    background: #E2E9F3;
+    color: {TEXT};
+}}
 """
 
 
