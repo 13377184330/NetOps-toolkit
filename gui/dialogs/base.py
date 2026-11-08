@@ -50,6 +50,68 @@ _OBJECT_ALIASES = {
     "dangerGhostButton": "dangerGhostButton",
 }
 
+# 四档按钮的内联样式（与 styles.py 的 QSS 同色值，浅色词——深色主题靠
+# theme.py 的声明级重映射照常翻译）。
+# 为什么内联：实测窗口级 QSS 的 #primaryButton 规则在 QStackedWidget 子树
+# 会失灵（主窗直挂蓝、页内挂白，逐层二分实锤），控件级样式优先级最高、
+# 不依赖级联，保证按钮语义色在任何容器层级都成立。
+from gui.styles import (ACCENT, ACCENT_HOVER, ACCENT_PRESSED, ACCENT_LIGHT,
+                        BORDER, BORDER_STRONG, CARD, DANGER, DANGER_HOVER,
+                        DISABLED_BG, DISABLED_TEXT, SUCCESS, SUCCESS_HOVER,
+                        TEXT, WARNING, WARNING_HOVER)
+
+_ROLE_QSS = {
+    "primaryButton": f"""
+        QPushButton {{
+            background: {ACCENT}; color: #FFFFFF; border: none;
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{ background: {ACCENT_HOVER}; }}
+        QPushButton:pressed {{ background: {ACCENT_PRESSED}; }}
+        QPushButton:disabled {{ background: #A8CDF5; color: #FFFFFF; }}
+    """,
+    "secondaryButton": f"""
+        QPushButton {{
+            background: {ACCENT_LIGHT}; color: {ACCENT};
+            border: 1px solid rgba(0, 137, 255, 0.25);
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{ background: #D8EAFF; }}
+    """,
+    "ghostButton": f"""
+        QPushButton {{
+            background: transparent; border: 1px solid {BORDER}; color: {TEXT};
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{
+            border: 1px solid {ACCENT}; color: {ACCENT}; background: {ACCENT_LIGHT};
+        }}
+    """,
+    "dangerButton": f"""
+        QPushButton {{
+            background: {DANGER}; color: #FFFFFF; border: none;
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{ background: {DANGER_HOVER}; }}
+    """,
+    "warningButton": f"""
+        QPushButton {{
+            background: {WARNING}; color: #FFFFFF; border: none;
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{ background: {WARNING_HOVER}; }}
+    """,
+    "dangerGhostButton": f"""
+        QPushButton {{
+            background: {CARD}; border: 1px solid {BORDER}; color: {DANGER};
+            padding: 11px 30px; border-radius: 11px; font-weight: bold; font-size: 14px;
+        }}
+        QPushButton:hover {{
+            background: #FDEEEE; border: 1px solid {DANGER}; color: {DANGER_HOVER};
+        }}
+    """,
+}
+
 # 屏幕可用区高度上限（%）：子窗口永远不许超出屏幕（真机截图教训：
 # Ping 弹窗 560+ 内高在 150% 缩放屏上直接被任务栏截断）
 _MAX_SCREEN_RATIO = 0.85
@@ -63,10 +125,13 @@ def _screen_avail_h():
 
 
 def make_button(text, role="secondary", parent=None, tip=None):
-    """按语义档位造一个统一样式的按钮（对话框外也可复用）"""
+    """按语义档位造一个统一样式的按钮（对话框外也可复用）。
+    样式为控件级内联（浅色词），不依赖窗口级 QSS 级联——后者在
+    QStackedWidget 子树实测会失灵。"""
     btn = QPushButton(text, parent)
     obj = ROLE_OBJECT.get(role) or _OBJECT_ALIASES.get(role, "secondaryButton")
     btn.setObjectName(obj)
+    btn.setStyleSheet(_ROLE_QSS.get(obj, _ROLE_QSS["ghostButton"]))
     btn.setCursor(Qt.PointingHandCursor)
     if tip:
         btn.setToolTip(tip)

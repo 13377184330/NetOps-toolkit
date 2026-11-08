@@ -26,7 +26,7 @@ from PyQt5.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
                           QPainterPath, QPen, QMouseEvent)
 from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox,
-                              QDialog, QFormLayout,
+                              QFormLayout,
                               QGraphicsItem, QGraphicsObject, QGraphicsScene,
                               QGraphicsTextItem, QGraphicsView, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -952,11 +952,9 @@ class PortConfigDialog(BaseDialog):
         self.port_list.itemSelectionChanged.connect(self._prefill_vlan)
         left.addWidget(self.port_list, 1)
         sel_row = QHBoxLayout()
-        sel_all = QPushButton("全选")
-        sel_all.setObjectName("ghostButton")
+        sel_all = make_button("全选", "ghost")
         sel_all.clicked.connect(self.port_list.selectAll)
-        sel_none = QPushButton("清空")
-        sel_none.setObjectName("ghostButton")
+        sel_none = make_button("清空", "ghost")
         sel_none.clicked.connect(self.port_list.clearSelection)
         sel_row.addWidget(sel_all)
         sel_row.addWidget(sel_none)
@@ -994,8 +992,7 @@ class PortConfigDialog(BaseDialog):
 
         right.addLayout(form)
 
-        gen_btn = QPushButton("⚙ 生成命令")
-        gen_btn.setObjectName("primaryButton")
+        gen_btn = make_button("⚙ 生成命令", "primary")
         gen_btn.clicked.connect(self.generate)
         right.addWidget(gen_btn)
 
@@ -1098,44 +1095,10 @@ class PortConfigDialog(BaseDialog):
 
 
 class AddDeviceDialog(BaseDialog):
-    """手工添加设备（没有 LLDP 时也能把真实网络画出来）"""
+    """[已退役] 手工添加设备旧弹窗——被右侧面板的内联表单取代（弹窗是对思维的打断）。
+    保留常量供表单复用；类本体不再被调用。"""
 
     TYPES = ["交换机", "PC / 服务器", "路由器", "防火墙", "AP / 其他"]
-
-    def __init__(self, parent=None):
-        super().__init__("添加设备", "", parent, min_width=460)
-
-        form = QFormLayout()
-        form.setSpacing(10)
-        self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("例如：办公区接入交换机 / 前台PC")
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(self.TYPES)
-        self.ip_edit = QLineEdit()
-        self.ip_edit.setPlaceholderText("可选，用于 Ping / SSH")
-        self.port_edit = QLineEdit()
-        self.port_edit.setPlaceholderText("可选，例如 GE1/0/8")
-        self.note_edit = QLineEdit()
-        self.note_edit.setPlaceholderText("可选，备注")
-        form.addRow("名称", self.name_edit)
-        form.addRow("类型", self.type_combo)
-        form.addRow("管理 IP", self.ip_edit)
-        form.addRow("接入端口", self.port_edit)
-        form.addRow("备注", self.note_edit)
-        self.content_layout().addLayout(form)
-
-        self.add_button("添加", "primary", None)   # accept 由回调统一处理
-        self.add_close_button("取消", "ghost")
-        self.name_edit.setFocus()
-
-    def data(self):
-        return {
-            "name": self.name_edit.text().strip() or "新设备",
-            "type": self.type_combo.currentText(),
-            "ip": self.ip_edit.text().strip(),
-            "port": self.port_edit.text().strip(),
-            "note": self.note_edit.text().strip(),
-        }
 
 
 # ---------------------------------------------------------------- 主页面
@@ -1175,37 +1138,32 @@ class NetworkTopologyPage(QWidget):
         bar.setSpacing(8)
         bar.addStretch(1)
 
-        collect_btn = QPushButton("🔌 一键采集")
-        collect_btn.setObjectName("primaryButton")
-        collect_btn.setToolTip("在当前页直接通过 Console 线采集交换机信息")
+        # 按钮统一走 make_button：控件级样式不依赖窗口级 QSS 级联
+        # （后者在 QStackedWidget 子树实测失灵，会让主按钮变白灰）
+        collect_btn = make_button("🔌 一键采集", "primary",
+                                  tip="在当前页直接通过 Console 线采集交换机信息")
         collect_btn.clicked.connect(self.collect_now)
 
-        panel_btn = QPushButton("🖥 设备面板")
-        panel_btn.setObjectName("primaryButton")
-        panel_btn.setToolTip("把交换机画成端口面板：颜色看状态、点端口看参数，\n"
-                             "改参数实时出命令，一键应用（经确认后写入设备）")
+        panel_btn = make_button("🖥 设备面板", "primary",
+                                tip="把交换机画成端口面板：颜色看状态、点端口看参数，\n"
+                                    "改参数实时出命令，一键应用（经确认后写入设备）")
         panel_btn.clicked.connect(self.show_device_panel)
 
-        help_btn = QPushButton("为什么只有自己？")
-        help_btn.setObjectName("ghostButton")
-        help_btn.setToolTip("说明拓扑的数据来源与发现不到设备的原因")
+        help_btn = make_button("为什么只有自己？", "ghost",
+                               tip="说明拓扑的数据来源与发现不到设备的原因")
         help_btn.clicked.connect(self.show_why)
 
-        add_btn = QPushButton("＋ 添加设备")
-        add_btn.setObjectName("secondaryButton")
+        add_btn = make_button("＋ 添加设备", "secondary")
         add_btn.clicked.connect(self.add_manual_node)
 
-        ports_btn = QPushButton("端口一览")
-        ports_btn.setObjectName("secondaryButton")
-        ports_btn.setToolTip("查看每个接口的配置和下挂终端")
+        ports_btn = make_button("端口一览", "secondary",
+                                tip="查看每个接口的配置和下挂终端")
         ports_btn.clicked.connect(self.show_port_table)
 
-        layout_btn = QPushButton("自动布局")
-        layout_btn.setObjectName("secondaryButton")
+        layout_btn = make_button("自动布局", "secondary")
         layout_btn.clicked.connect(lambda: self.scene.auto_layout())
 
-        fit_btn = QPushButton("适应窗口")
-        fit_btn.setObjectName("ghostButton")
+        fit_btn = make_button("适应窗口", "ghost")
         fit_btn.clicked.connect(lambda: self.view.fit_content())
 
         for w in (collect_btn, panel_btn, help_btn, add_btn, ports_btn,
@@ -1318,13 +1276,8 @@ class NetworkTopologyPage(QWidget):
         lay.addStretch()
         return panel
 
-    def _on_selection_changed(self):
-        nodes = [i for i in self.scene.selectedItems() if isinstance(i, DeviceNode)]
-        self._show_detail(nodes[0] if len(nodes) == 1 else None)
-
-    def _show_detail(self, node):
-        """侧板填充：参数行 + 操作按钮（保持与设备面板同一套动作）"""
-        # 清空旧内容
+    def _clear_detail_body(self):
+        """清空侧板动态区（表单行 + 按钮），供详情/添加表单两个模式共用"""
         while self._detail_form.count():
             item = self._detail_form.takeAt(0)
             w = item.widget()
@@ -1335,6 +1288,15 @@ class NetworkTopologyPage(QWidget):
             w = item.widget()
             if w is not None:
                 w.deleteLater()
+
+    def _on_selection_changed(self):
+        nodes = [i for i in self.scene.selectedItems() if isinstance(i, DeviceNode)]
+        self._show_detail(nodes[0] if len(nodes) == 1 else None)
+
+    def _show_detail(self, node):
+        """侧板填充：参数行 + 操作按钮（保持与设备面板同一套动作）"""
+        # 清空旧内容
+        self._clear_detail_body()
 
         if node is None:
             self.detail_title.setText("未选择设备")
@@ -1927,23 +1889,83 @@ class NetworkTopologyPage(QWidget):
         if node.scene() is not None:
             node.scene().removeItem(node)
 
-    # ---------------- 手工添加 ----------------
+    # ---------------- 手工添加（侧板内联表单，不弹窗打断） ----------------
     def add_manual_node(self):
-        dlg = AddDeviceDialog(self)
-        if dlg.exec_() != QDialog.Accepted:
+        """「＋ 添加设备」入口：右侧面板就地切换为添加表单。
+        弹窗是对思维的打断——内联表单就地填写、填完即回详情，全程不离开本页。"""
+        self._show_add_form()
+
+    def _show_add_form(self):
+        """右侧详情区切换为「添加设备」内联表单（添加完成/取消后自动切回详情）"""
+        self._add_err = ""
+        self.detail_title.setText("添加设备")
+        self.detail_kind.setText("没有 LLDP 时也能把真实网络画出来；填完点「添加」")
+        self._clear_detail_body()
+
+        f_key = "color: #5F6B7A; font-size: 13px;"
+        self._name_edit = QLineEdit()
+        self._name_edit.setPlaceholderText("例如：办公区接入交换机 / 前台PC")
+        self._type_combo = QComboBox()
+        self._type_combo.addItems(AddDeviceDialog.TYPES)
+        self._ip_edit = QLineEdit()
+        self._ip_edit.setPlaceholderText("可选，用于 Ping / SSH")
+        self._port_edit = QLineEdit()
+        self._port_edit.setPlaceholderText("可选，例如 GE1/0/8")
+        self._note_edit = QLineEdit()
+        self._note_edit.setPlaceholderText("可选，备注")
+        for label, w in (("名称", self._name_edit), ("类型", self._type_combo),
+                         ("管理 IP", self._ip_edit), ("接入端口", self._port_edit),
+                         ("备注", self._note_edit)):
+            lab = QLabel(label)
+            lab.setStyleSheet(f_key)
+            self._detail_form.addRow(lab, w)
+        # Enter 直接提交（表单节奏：填完回车，不用找按钮）
+        for w in (self._name_edit, self._ip_edit, self._port_edit, self._note_edit):
+            w.returnPressed.connect(self._submit_add_form)
+        # 输入即清红边（校验状态不残留）
+        self._name_edit.textChanged.connect(lambda: self._name_edit.setStyleSheet(""))
+
+        add_btn = make_button("添加", "primary", self)
+        add_btn.clicked.connect(self._submit_add_form)
+        cancel_btn = make_button("取消", "ghost", self)
+        cancel_btn.clicked.connect(lambda: self._show_detail(None))
+        self.detail_btn_col.addWidget(add_btn)
+        self.detail_btn_col.addWidget(cancel_btn)
+        self._name_edit.setFocus()
+
+    def _submit_add_form(self):
+        name = self._name_edit.text().strip()
+        if not name:
+            # 非打断式校验：红边 + 说明文字（内联表单不用弹窗打断思维，
+            # 与设备面板的字段红边同一套反馈语言）
+            self._name_edit.setStyleSheet(
+                "border: 2px solid #FA5151; border-radius: 9px;")
+            self.detail_kind.setText("⚠ 名称必填——填一个便于识别的名字（如：办公区交换机）")
+            self._name_edit.setFocus()
             return
-        d = dlg.data()
-        kind = "pc" if "PC" in d["type"] or "服务器" in d["type"] else "host"
-        meta = {"管理 IP": d["ip"], "接入端口": d["port"], "类型": d["type"], "备注": d["note"]}
-        node = DeviceNode(d["name"], kind, meta=meta,
-                          subtitle=d["port"] or d["ip"] or d["type"])
+        self._name_edit.setStyleSheet("")   # 清红边
+        self.detail_kind.setText("没有 LLDP 时也能把真实网络画出来；填完点「添加」")
+        dtype = self._type_combo.currentText()
+        ip = self._ip_edit.text().strip()
+        port = self._port_edit.text().strip()
+        note = self._note_edit.text().strip()
+        # 类型 → 节点形态：交换机画网管设备机身、PC/服务器画显示器、其余画终端盒
+        kind = ("pc" if ("PC" in dtype or "服务器" in dtype)
+                else "neighbor" if dtype == "交换机" else "host")
+        meta = {"管理 IP": ip, "接入端口": port, "类型": dtype, "备注": note}
+        node = DeviceNode(name, kind, meta=meta, subtitle=port or ip or dtype)
+        if ip:
+            node._badges = [(f"IP {ip}", "ip")]     # 与采集节点同语言
         self.scene.addItem(node)
         self._manual.append(node)
         anchor = self._sw_node or self._pc_node
         if anchor is not None:
-            LinkItem(anchor, node, d["port"])
+            LinkItem(anchor, node, port)
         node.setPos(160, 200 + 110 * (len(self._manual) - 1))
         self.view.fit_content()
+        self.status_label.setText(f"已添加「{name}」——右侧面板已切回该设备详情")
+        # 添加完成就换回来：选中新节点，侧板自动联动显示它的参数
+        node.setSelected(True)
 
     # ---------------- 说明 ----------------
     def show_why(self):

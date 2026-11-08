@@ -293,7 +293,10 @@ class MainWindow(QMainWindow):
         self._preview_collapsed = False
         # 全局样式后显式应用侧边导航样式（防覆盖）
         from gui.side_nav import NAV_QSS
-        self.tab_widget.setStyleSheet(NAV_QSS)
+                # QSS 层级实测：给整棵页签容器设样式表会切断 MainWindow 层的 QPushButton#primaryButton
+        # 等规则对页内按钮的作用（内联表单主按钮变白灰、主次不分）。nav 在
+        # side_nav.py:60 已单独设置，此行多余且有害，弃用。
+        # self.tab_widget.setStyleSheet(NAV_QSS)
         self.tab_widget._nav.setStyleSheet(NAV_QSS)
         self.tab_widget.select_first()  # 默认选中第一页（导航高亮）
         
