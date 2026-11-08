@@ -117,13 +117,21 @@ class PortCell(QWidget):
         p.setPen(QColor("#1D2129"))
         p.drawText(self.rect().adjusted(0, 0, 0, -18), Qt.AlignCenter, i["label"])
 
+        # VLAN 可视化：Access 口且知道 VLAN 时，格子底部画 VLAN 色条 + 小字同色，
+        # 跨口扫读一眼对上「哪些口在同一个 VLAN」（与拓扑页同色源）
+        vlan_id = i["vlan"] if (i["vlan"] or "").isdigit() else ""
+        if vlan_id:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(theme.vlan_color(vlan_id))))
+            p.drawRect(3, CELL_H - 5, CELL_W - 6, 3)
+
         small = {"up": f"V{i['vlan']}" if i["vlan"] else "up",
                  "down": f"V{i['vlan']}" if i["vlan"] else "—",
                  "trunk": "trunk", "shutdown": "已关",
                  "unknown": "无数据"}.get(i["state"], "")
         f2 = QFont("Microsoft YaHei UI", 8)
         p.setFont(f2)
-        p.setPen(QColor(border))
+        p.setPen(QColor(theme.vlan_color(vlan_id)) if vlan_id else QColor(border))
         p.drawText(QRectF(2, CELL_H - 17, CELL_W - 4, 14), Qt.AlignCenter, small)
 
         # 角标：蓝点=下挂终端 / 紫点=LLDP 邻居
@@ -197,7 +205,7 @@ class DevicePanelDialog(BaseDialog):
             "🖥 设备面板 · " + name,
             "傻瓜式三步：① 点端口看参数  ② 改参数（下面命令实时生成）  "
             "③ 应用到设备（会弹确认，下发后自动重新采集）",
-            parent or page, min_width=1280, min_height=620)
+            parent or page, min_width=1280, min_height=620, scrollable=True)
         self._vendor = vendor
         self._cells = []                       # [PortCell]
         self._by_name = {}

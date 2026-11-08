@@ -129,6 +129,26 @@ def qcolor(key):
     return QColor(t(key))
 
 
+# ---------------- VLAN 配色引擎（拓扑/设备面板共用色源） ----------------
+# 12 个高区分度色相（紫/玫红/青/金/靛/赭橙/橄榄/梅紫/珊瑚/雾蓝/黄绿/洋红），
+# 与状态色（绿 success / 红 danger / 橙 warning / 蓝 accent）拉开观感距离；
+# 深浅主题共用同一色板——VLAN 色条/分组框都带 ID 文字标注，撞色相也有数字消歧。
+VLAN_PALETTE = [
+    "#8E6FD8", "#E85D9E", "#22B8CF", "#C9A227",
+    "#6C7BD9", "#D2691E", "#7A9E4F", "#A34BA0",
+    "#E8967E", "#5A9BC4", "#94A040", "#C2185B",
+]
+
+
+def vlan_color(vid):
+    """VLAN ID → 稳定色值（同一 VLAN 永远同色：端口格色条/终端徽章/分组框/图例一致）"""
+    try:
+        idx = int(str(vid).strip()) % len(VLAN_PALETTE)
+    except (ValueError, TypeError):
+        idx = 0
+    return VLAN_PALETTE[idx]
+
+
 def on_change(callback):
     """注册主题切换回调（拓扑画布等手绘控件刷新视图）"""
     if callback not in _change_callbacks:

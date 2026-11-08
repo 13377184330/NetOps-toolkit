@@ -15,24 +15,20 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
-from gui.dialogs.base import info_box, question_box
+from gui.dialogs.base import BaseDialog, info_box, question_box
 from utils.settings import Settings
 
 
-class SettingsDialog(QDialog):
-    """系统设置对话框"""
-    
+class SettingsDialog(BaseDialog):
+    """系统设置对话框（统一无边框子窗口骨架）"""
+
     def __init__(self, parent=None):
-        super().__init__(parent)
         self.settings = Settings()
+        super().__init__("系统设置", "", parent, min_width=500, min_height=450)
         self.initUI()
-    
+
     def initUI(self):
-        self.setWindowTitle("系统设置")
-        self.setMinimumSize(500, 450)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        
-        layout = QVBoxLayout(self)
+        layout = self.content_layout()
         layout.setSpacing(15)
         
         tabs = QTabWidget()
@@ -175,29 +171,14 @@ class SettingsDialog(QDialog):
         history_layout.addStretch()
         
         tabs.addTab(history_widget, "历史")
-        
+
         layout.addWidget(tabs)
-        
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        
-        reset_btn = QPushButton("恢复默认")
-        reset_btn.setObjectName("ghostButton")
-        reset_btn.clicked.connect(self.reset_settings)
-        btn_row.addWidget(reset_btn)
-        
-        cancel_btn = QPushButton("取消")
-        cancel_btn.setObjectName("ghostButton")
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
-        
-        save_btn = QPushButton("保存")
-        save_btn.setObjectName("primaryButton")
-        save_btn.clicked.connect(self.save_settings)
-        btn_row.addWidget(save_btn)
-        
-        layout.addLayout(btn_row)
-    
+
+        # 按钮行（BaseDialog 统一行：主操作自然落在最右）
+        self.add_button("恢复默认", "ghost", self.reset_settings, close_on_click=False)
+        self.add_close_button("取消", "ghost")
+        self.add_button("保存", "primary", self.save_settings, close_on_click=False)
+
     def save_settings(self):
         theme_map = {0: 'light', 1: 'dark', 2: 'system'}
         new_pref = theme_map[self.theme_combo.currentIndex()]

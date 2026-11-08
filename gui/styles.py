@@ -689,8 +689,9 @@ QToolTip {
 
 DIALOG_STYLE = f"""
 QDialog {{
-    background: {BG};
-    border-radius: 14px;
+    /* 无边框对话框：底色由 BaseDialog.paintEvent 手绘圆角，
+       QSS 只能透明，否则会把圆角外的透明区填满矩形 */
+    background: transparent;
 }}
 
 /* ---------- 对话框标题/副标题（BaseDialog 统一骨架）---------- */
@@ -707,7 +708,7 @@ QLabel#dlgSubtitle {{
     background: transparent;
 }}
 
-/* ---------- 统一消息框（base.py 的 info/warn/error/question 走这里）---------- */
+/* ---------- 兼容保留：仍有独立样式的消息场景（QMessageBox 已退役，留作降级）---------- */
 QMessageBox {{
     background: {BG};
 }}
@@ -721,10 +722,6 @@ QMessageBox QLabel {{
 
 QMessageBox QPushButton {{
     min-width: 96px;
-}}
-
-QMessageBox QLabel#qt_msgbox_label {{
-    min-width: 240px;
 }}
 """
 

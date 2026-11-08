@@ -8,13 +8,13 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QPushButton, QTextEdit, QLabel,
                              QFileDialog, QSplitter, QStatusBar,
-                             QDialog, QListWidget, QDialogButtonBox, QMenu, QAction,
+                             QListWidget, QMenu, QAction,
                              QComboBox, QMenuBar)
 from PyQt5.QtCore import Qt, QPoint, QEvent, QObject
 from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication, QPalette
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
-from gui.dialogs.base import info_box, warn_box, error_box, question_box
+from gui.dialogs.base import BaseDialog, info_box, warn_box, error_box, question_box
 from gui import theme
 from gui.title_bar import FramelessTitleBar
 from gui.side_nav import _SideNavWidget
@@ -159,51 +159,48 @@ def get_vendor_templates(vendor: str):
     return TEMPLATE_SET_DICTS.get(VENDOR_TEMPLATE_SETS.get(vendor, "H3C"), H3C_TEMPLATES)
 
 
-class TemplateDialog(QDialog):
-    """模板选择对话框"""
-    
+class TemplateDialog(BaseDialog):
+    """模板选择对话框（统一无边框子窗口骨架）"""
+
     def __init__(self, device_type="huawei", parent=None):
-        super().__init__(parent)
+        super().__init__(f"选择{VENDOR_CN.get(device_type, '')}配置模板",
+                         "请选择一个预设模板快速生成配置：",
+                         parent, min_width=500, scrollable=False)
         self.selected_template = None
         self.device_type = device_type
-        self.initUI()
-    
-    def initUI(self):
-        self.setWindowTitle(f"选择{VENDOR_CN.get(self.device_type, '')}配置模板")
         self.setFixedSize(500, 400)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        
-        layout = QVBoxLayout(self)
-        
-        label = QLabel("请选择一个预设模板快速生成配置：")
-        label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 10px; color: #1F2A37;")
-        layout.addWidget(label)
-        
+
         self.template_list = QListWidget()
-        
+
         # 五厂商统一取模板集
         self._templates = get_vendor_templates(self.device_type)
         for name in self._templates.keys():
             self.template_list.addItem(name)
-        
+
         self.template_list.setStyleSheet("font-size: 13px;")
         self.template_list.currentRowChanged.connect(self.on_selection_changed)
-        layout.addWidget(self.template_list)
-        
+        self.add_content(self.template_list, 1)
+
         self.desc_label = QLabel("选择模板查看描述")
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("font-size: 12px; padding: 10px; color: #8a8a9e;")
-        layout.addWidget(self.desc_label)
-        
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-    
+        self.desc_label.setStyleSheet("font-size: 12px; padding: 10px; color: #8A95A6;")
+        self.add_content(self.desc_label)
+
+        self.add_button("确定", "primary", None)
+        self.add_close_button("取消", "ghost")
+
     def on_selection_changed(self, row):
         names = list(self._templates.keys())
         if 0 <= row < len(names):
             self.desc_label.setText(self._templates[names[row]].get("description", ""))
+
+    def accept(self):
+        # 确定前把选中模板写回 selected_template（保持旧接口）
+        row = self.template_list.currentRow()
+        names = list(self._templates.keys())
+        if 0 <= row < len(names):
+            self.selected_template = self._templates[names[row]]
+        super().accept()
 
 
 class MainWindow(QMainWindow):
@@ -887,8 +884,6 @@ class MainWindow(QMainWindow):
         }
         
         if tool_name in tool_widgets:
-            dialog = QDialog(self)
-            
             titles = {
                 "subnet": "子网计算器",
                 "ping": "Ping测试",
@@ -909,19 +904,14 @@ class MainWindow(QMainWindow):
                 "batch": "批量生成（CSV）",
                 "onboard": "一键标准化开局"
             }
-            
-            dialog.setWindowTitle(f"{titles.get(tool_name, tool_name)}")
-            dialog.setMinimumSize(800, 600)
+            title = titles.get(tool_name, tool_name)
+            # 统一子窗口：BaseDialog（无边框圆点标题栏 + 高度钐制 + 长内容滚动）
+            dialog = BaseDialog(title, "", self, min_width=800, min_height=600,
+                                scrollable=True)
             dialog.resize(1000, 750)
-            
-            dialog.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-            
-            layout = QVBoxLayout(dialog)
-            layout.setContentsMargins(22, 20, 22, 18)
-            layout.setSpacing(14)
             widget = tool_widgets[tool_name]()
-            layout.addWidget(widget)
-            
+            dialog.add_content(widget, 1)
+
             dialog.exec_()
     
     def open_tools_window(self):
@@ -960,7 +950,7 @@ class MainWindow(QMainWindow):
     
     def show_template_dialog(self):
         dialog = TemplateDialog(self.current_device_type, self)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec_() == BaseDialog.Accepted:
             if self.current_device_type == "huawei":
                 template_names = get_template_names()
             else:

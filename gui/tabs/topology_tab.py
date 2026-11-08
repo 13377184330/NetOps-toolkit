@@ -239,6 +239,7 @@ class DeviceNode(QGraphicsObject):
         self._port_rects = []          # paint 时缓存 [(name, QRectF)]（节点本地坐标）
         self._hover_port = ""          # 当前 hover 的端口格
         self._press_port = ""          # press 命中的端口格（release 同格才算点击）
+        self._vlan_boxes = []          # 本节点参与的 VLAN 分组框（拖动时通知重算几何）
 
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
@@ -463,6 +464,13 @@ class DeviceNode(QGraphicsObject):
                 border_col = QColor(theme.t("border_strong"))
             painter.setPen(QPen(border_col, 1 if not hovered else 2))
             painter.drawRoundedRect(cell, 3, 3)
+            # VLAN 色条（v3.1 参数可视化）：Access 口且知道 VLAN 时，格底画 VLAN 色条，
+            # 同 VLAN 端口同色——扫一眼就知道哪些口在同一广播域（与分组框/图例同色源）
+            if data.get("vlan"):
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(theme.vlan_color(data["vlan"])))
+                painter.drawRect(QRectF(cell.left() + 2, cell.bottom() - 4,
+                                        cell.width() - 4, 3.5))
             # 格内端口序号
             fnum = QFont("Microsoft YaHei UI", 7)
             painter.setFont(fnum)
@@ -495,16 +503,20 @@ class DeviceNode(QGraphicsObject):
             x += w + 6
 
     def _paint_one_badge(self, painter, rect, text, tone):
-        """小胶囊徽章：浅底 + 深字（主题感知）"""
-        palette = {
-            "ip":    (theme.t("success"), theme.t("card")),
-            "vlan":  (theme.t("accent"), theme.t("card")),
-            "ok":    (theme.t("success"), theme.t("card")),
-            "warn":  (theme.t("warning"), theme.t("card")),
-            "danger": (theme.t("danger"), theme.t("card")),
-        }
-        fg, bg = palette.get(tone, (theme.t("text_sub"), theme.t("card")))
-        bgc = QColor(bg)
+        """小胶囊徽章：浅底 + 深字（主题感知）。
+        tone 支持 "vlan:<id>"——用 VLAN 配色，与分组框/端口色条/图例同源"""
+        if str(tone).startswith("vlan:"):
+            fg = theme.vlan_color(str(tone).split(":", 1)[1])
+        else:
+            palette = {
+                "ip":    (theme.t("success"), theme.t("card")),
+                "vlan":  (theme.t("accent"), theme.t("card")),
+                "ok":    (theme.t("success"), theme.t("card")),
+                "warn":  (theme.t("warning"), theme.t("card")),
+                "danger": (theme.t("danger"), theme.t("card")),
+            }
+            fg, bg = palette.get(tone, (theme.t("text_sub"), theme.t("card")))
+        bgc = QColor(theme.t("card"))
         # 半透明浅底：拿前景色混一层白色（浅色主题）；深色主题混卡片色
         if theme.is_dark():
             base = QColor(theme.t("card"))
@@ -615,6 +627,8 @@ class DeviceNode(QGraphicsObject):
         if change == QGraphicsItem.ItemPositionHasChanged:
             for link in self.links:
                 link.refresh()
+            for box in self._vlan_boxes:
+                box.refresh()
         return super().itemChange(change, value)
 
     def mouseDoubleClickEvent(self, event):
@@ -639,6 +653,86 @@ class DeviceNode(QGraphicsObject):
             event.accept()
             return
         super().contextMenuEvent(event)
+
+
+# ---------------------------------------------------------------- VLAN 分组框
+class VlanGroupItem(QGraphicsItem):
+    """VLAN 分组围栏：同 VLAN 终端被圆角虚线框围住（颜色=VLAN 色），
+    参数结合拓扑的分组层——图上直接看到「谁和谁在同一个广播域」。
+    几何实时跟随成员节点（拖动节点框自动重算），标签带 VLAN ID 与台数。"""
+
+    def __init__(self, vlan_id, nodes):
+        super().__init__()
+        self.vlan = str(vlan_id)
+        self.nodes = list(nodes)
+        self.setZValue(-2)          # 连线(-1)之下、画布之上
+        self._hover = False
+        self.setAcceptHoverEvents(True)
+        self.setToolTip(f"VLAN {self.vlan} 广播域：{len(self.nodes)} 台终端" +
+                         "\n（同 VLAN 终端互通；改端口 VLAN = 改它的广播域）")
+
+    def _union_rect(self):
+        rect = QRectF()
+        for n in self.nodes:
+            r = n.boundingRect().translated(n.scenePos())
+            rect = r if rect.isNull() else rect.united(r)
+        if rect.isNull():
+            return QRectF()
+        return rect.adjusted(-42, -40, 42, 26)
+
+    def boundingRect(self):
+        return self._union_rect()
+
+    def paint(self, painter, option, widget=None):
+        rect = self._union_rect()
+        if rect.isNull():
+            return
+        painter.setRenderHint(QPainter.Antialiasing)
+        color = QColor(theme.vlan_color(self.vlan))
+        # 半透明 VLAN 色底 + 同色虚线边框
+        fill = QColor(color)
+        fill.setAlpha(16)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, 14, 14)
+        pen = QPen(color, 2)
+        pen.setStyle(Qt.DashLine if not self._hover else Qt.SolidLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRoundedRect(rect, 14, 14)
+        # 左上标签：色块 + VLAN n · 台数
+        font = QFont("Microsoft YaHei UI", 9)
+        font.setBold(True)
+        fm = QFontMetrics(font)
+        label = f"VLAN {self.vlan} · {len(self.nodes)} 台"
+        tw = fm.horizontalAdvance(label) + 34
+        th = fm.height() + 6
+        lrect = QRectF(rect.left() + 12, rect.top() - th / 2, tw, th)
+        painter.setPen(Qt.NoPen)
+        bg = QColor(theme.t("card"))
+        bg.setAlpha(232)
+        painter.setBrush(bg)
+        painter.drawRoundedRect(lrect, 9, 9)
+        painter.setBrush(color)
+        painter.drawRoundedRect(QRectF(lrect.left() + 8, lrect.center().y() - 4, 8, 8), 2, 2)
+        painter.setPen(QColor(theme.t("text")))
+        painter.setFont(font)
+        painter.drawText(QRectF(lrect.left() + 20, lrect.top(), tw, th),
+                         Qt.AlignVCenter | Qt.AlignLeft, label)
+
+    def refresh(self):
+        self.prepareGeometryChange()
+        self.update()
+
+    def hoverEnterEvent(self, event):
+        self._hover = True
+        self.update()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super().hoverLeaveEvent(event)
 
 
 # ---------------------------------------------------------------- 场景
@@ -683,21 +777,22 @@ class TopologyScene(QGraphicsScene):
                 node.setPos(x, y)
 
         if hosts:
-            # 按接入端口分组：同端口的终端聚成一列，端口与端口错开
+            # 按 VLAN 分组排布（与分组围栏对齐，围栏自动围住）；
+            # 无 VLAN 数据的终端退回按接入端口分组
             groups = {}
             order = []
             for h in hosts:
-                key = _norm_port(h.meta.get("接入端口", "")) or "-"
+                v = str(h.meta.get("VLAN", "") or "").strip()
+                key = v if v.isdigit() else ("p:" + _norm_port(h.meta.get("接入端口", "") or "-"))
                 if key not in groups:
                     groups[key] = []
                     order.append(key)
                 groups[key].append(h)
             n_groups = len(order)
             for gi, key in enumerate(order):
-                gx = (gi - (n_groups - 1) / 2) * 300
+                gx = (gi - (n_groups - 1) / 2) * 340
                 for hi, node in enumerate(groups[key]):
-                    node.setPos(gx + (hi % 2) * 150 - 75, 430 + hi * 110)
-                # 每组标一个"端口锚点"位置感：组首节点副标题已带端口名，无需额外画
+                    node.setPos(gx + (hi % 2) * 170 - 85, 430 + (hi // 2) * 124)
 
         views = self.views()
         if views:
@@ -789,7 +884,7 @@ class PortTableDialog(BaseDialog):
     def __init__(self, rows, parent=None):
         super().__init__("端口一览", "按接口列出配置/链路状态/下挂终端"
                          "（running-config + MAC/ARP 表 + 端口链路状态，只读）",
-                         parent, min_width=760, min_height=520)
+                         parent, min_width=760, min_height=520, scrollable=True)
 
         table = QTableWidget(len(rows), 5)
         table.setHorizontalHeaderLabels(["接口", "状态", "描述", "VLAN", "下挂终端"])
@@ -827,7 +922,7 @@ class PortConfigDialog(BaseDialog):
             "端口配置（Access / Trunk）",
             f"多选左侧端口 → 按当前设备厂商（{vendor or 'huawei'}）语法生成命令；"
             "「送往下发」会填入 Console 页，点「下发到设备」确认后才写入设备",
-            parent, min_width=880, min_height=560)
+            parent, min_width=880, min_height=560, scrollable=True)
         self._vendor = vendor or "huawei"
         self._lines = []          # [(cmd, 中文释义)]
         self._vlan_map = vlan_map or {}   # 端口名 → 当前 Access VLAN（采集读到的，预填用）
@@ -1158,15 +1253,28 @@ class NetworkTopologyPage(QWidget):
         self._refresh_legend()
 
     def _refresh_legend(self):
-        """图例：端口灯与连线颜色语义（画布上直接读图，不用猜）"""
+        """图例：端口灯与连线颜色语义 + VLAN 色卡（画布上直接读图，不用猜）"""
         def dot(c):
             return (f"<span style='background:{c};color:{c}'>&nbsp;&nbsp;&nbsp;</span>")
         t = theme.t
-        self.legend_label.setText(
-            f"端口格：{dot(t('success'))} UP　{dot(t('scroll_handle'))} DOWN　"
-            f"{dot(t('accent'))} Trunk　{dot(t('danger'))} 已shutdown　"
-            f"｜ 连线：{dot(t('success'))} UP链路　{dot(t('warning'))} 未识别链路"
-            f"　{dot(t('accent'))} Console管理线（虚线）")
+        html = (f"端口格：{dot(t('success'))} UP　{dot(t('scroll_handle'))} DOWN　"
+                f"{dot(t('accent'))} Trunk　{dot(t('danger'))} 已shutdown　"
+                f"｜ 连线：{dot(t('success'))} UP链路　{dot(t('warning'))} 未识别链路"
+                f"　{dot(t('accent'))} Console管理线（虚线）")
+        # VLAN 色卡（采集后展示全网 VLAN 分布，与分组框/端口色条/徽章同色）
+        vids = []
+        for v in (self._data.get("parsed") or {}).get("vlans") or []:
+            try:
+                vids.append(int(v.get("id")))
+            except (TypeError, ValueError):
+                continue
+        vids = sorted(set(vids))
+        if vids:
+            shown = vids[:10]
+            cards = "　".join(f"{dot(theme.vlan_color(v))} {v}" for v in shown)
+            more = f"　…等 {len(vids) - 10} 个" if len(vids) > 10 else ""
+            html += f"　｜ VLAN：{cards}{more}"
+        self.legend_label.setText(html)
 
     # ---------------- 右侧详情面板（单击联动，非模态） ----------------
     def _build_detail_panel(self):
@@ -1276,6 +1384,7 @@ class NetworkTopologyPage(QWidget):
         self._manual = []
         self.scene.clear()
         self._build_empty_state()
+        self._refresh_legend()
 
     def _build_empty_state(self):
         from modules.host_info import local_host
@@ -1417,7 +1526,8 @@ class NetworkTopologyPage(QWidget):
             if h.get("ip"):
                 h_badges.append((f"IP {h['ip']}", "ip"))
             if h.get("vlan"):
-                h_badges.append((f"VLAN {h['vlan']}", "vlan"))
+                # VLAN 徽章用 VLAN 配色（与分组框/端口色条/图例同源，一眼归堆）
+                h_badges.append((f"VLAN {h['vlan']}", f"vlan:{h['vlan']}"))
             node = DeviceNode(label, "host",
                               meta={"MAC": h.get("mac_display", ""),
                                     "IP": h.get("ip", "") or "未获取",
@@ -1430,6 +1540,7 @@ class NetworkTopologyPage(QWidget):
 
         # 有链路但没有任何发现数据的端口 → 「未识别设备」
         # 真实场景：对端交换机未启用 LLDP（思科等出厂默认关）或哑交换机；
+        # 不标出来用户会以为软件坏了，标出来才是"看得见"的运维
         # 不标出来用户会以为软件坏了，标出来才是“看得见”的运维
         known = set()
         pc_port = self._pc_node.meta.get("接入端口", "")
@@ -1454,13 +1565,29 @@ class NetworkTopologyPage(QWidget):
             self.scene.addItem(node)
             LinkItem(sw, node, f"{_short_port(port)} · 有链路", state="unknown")
 
+        # ---- VLAN 分组围栏（v3.1 参数可视化）：同 VLAN 终端围一个框 ----
+        vlan_groups = {}
+        for n in self.scene.nodes():
+            if n.kind == "host":
+                v = str(n.meta.get("VLAN", "") or "").strip()
+                if v.isdigit():
+                    vlan_groups.setdefault(v, []).append(n)
+        for vid, members in vlan_groups.items():
+            if len(members) >= 1:
+                box = VlanGroupItem(vid, members)
+                self.scene.addItem(box)
+                for n in members:
+                    n._vlan_boxes.append(box)
+
         self.scene.auto_layout()
         self.view.fit_content()
         self._update_status(sw, neighbors, end_hosts, unknown_ports)
+        self._refresh_legend()
 
     # ---------------- 端口面板数据装配 ----------------
     def _build_port_cells(self, parsed, link_up):
-        """采集接口 → 端口格列表（只画物理/聚合口，SVI/NULL/管理口不上面板）"""
+        """采集接口 → 端口格列表（只画物理/聚合口，SVI/NULL/管理口不上面板）。
+        v3.1：附 vlan 字段（Access VLAN 数字），端口格底部画 VLAN 色条"""
         cells = []
         for itf in parsed.get("interfaces") or []:
             name = itf["name"]
@@ -1468,11 +1595,14 @@ class NetworkTopologyPage(QWidget):
                                        "mgigabit", "loopback", "inloop", "tunnel")):
                 continue
             state = _port_state(itf, link_up)
+            vlan_val = str((itf.get("detail") or {}).get("VLAN", "") or "").strip()
+            vlan_id = vlan_val if vlan_val.isdigit() else ""   # "trunk 1 to 10" 不画色条
             cells.append({
                 "name": name,
                 "state": state,
                 "label": _port_label(name),
                 "group": itf.get("kind") or "其他",
+                "vlan": vlan_id,
                 "tip": _port_tip(itf, state),
             })
         return cells
@@ -1769,7 +1899,7 @@ class NetworkTopologyPage(QWidget):
             warn_box(self, "Ping", f"Ping 工具不可用：{e}")
             return
         dlg = BaseDialog(f"Ping {name}", f"目标：{ip}（连通性验证，只读）",
-                         self, min_width=780, min_height=560)
+                         self, min_width=780, min_height=560, scrollable=True)
         w = PingTestWidget()
         if hasattr(w, "host_input"):
             w.host_input.setText(ip)
