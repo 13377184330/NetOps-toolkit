@@ -52,7 +52,7 @@ LIGHT = {
     "text_sub":      "#5F6B7A",
     "text_muted":    "#8A95A6",
     "disabled_text": "#B3BCCB",
-    "placeholder":   "#8A95A6",
+    "placeholder":   "#6E7B8C",   # 输入占位：比正文弱但 ≥4.5:1（视觉审查两轮点名后加深）
     # 代码预览（深色面板，两主题都保持深色，只微调边线）
     "preview_bg":    "#1E2430",
     "preview_border": "#2C3444",
@@ -63,6 +63,13 @@ LIGHT = {
     "scroll_handle_hover": "#AEBACB",
     "canvas_bg":     "#F7F9FC",   # 拓扑画布
     "canvas_grid":   "#E4EAF3",
+    # 设备面板端口方块（状态色块）：浅色为淡色底+深边框，深色为暗色底+亮边框
+    "port_up_bg":     "#E6F7EC",
+    "port_up_border": "#27AE60",
+    "port_down_bg":   "#EDF1F6",
+    "port_down_border": "#AAB8CA",
+    "port_trunk_bg":   "#F4EEFC",
+    "port_trunk_border": "#8E6FD8",
     # 阴影（QSS rgba）
     "shadow":        "rgba(31, 42, 55, 28)",
 }
@@ -93,7 +100,7 @@ DARK = {
     "text_sub":      "#A3AFC2",
     "text_muted":    "#76839A",
     "disabled_text": "#5C6980",
-    "placeholder":   "#76839A",
+    "placeholder":   "#8B97AC",
     "preview_bg":    "#1A202B",
     "preview_border": "#303A4A",
     "preview_text":  "#C8D3E8",
@@ -102,6 +109,14 @@ DARK = {
     "scroll_handle_hover": "#4C5B72",
     "canvas_bg":     "#141A22",
     "canvas_grid":   "#202836",
+    # 设备面板端口方块：暗色底 + 提亮边框（深色主题下状态色仍一眼可辨）
+    "port_up_bg":     "#20392B",
+    "port_up_border": "#4ED882",
+    "port_down_bg":   "#2A3340",
+    "port_down_border": "#47556C",
+    "port_trunk_bg":   "#322B4E",
+    "port_trunk_border": "#A88FE8",
+    # 阴影（QSS rgba）
     "shadow":        "rgba(0, 0, 0, 90)",
 }
 
@@ -181,6 +196,10 @@ _SURFACE_MAP = {
     "#E4EAF3": DARK["track"],
     "#E8E8E8": DARK["track"],
     "#E0E0E0": DARK["track"],
+    # 滚动条滑块（styles.py 浅色值，深色下需映射到暗色把手，否则亮块刺眼）
+    "#CBD5E3": DARK["scroll_handle"],
+    "#AEBACB": DARK["scroll_handle_hover"],
+    "#D3DBE7": DARK["scroll_handle"],
     # 浅蓝系（选中/悬浮底）
     "#EAF4FF": DARK["accent_light"],
     "#E3F2FD": DARK["accent_light"],

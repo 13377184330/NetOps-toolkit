@@ -42,15 +42,16 @@ _PER_ROW = 10          # 电口每行格数（保证左区完整展示不被裁�
 
 
 def _state_palette(state):
-    """状态 → (底色, 边框色)——浅色词汇 + theme 取色，深色主题下由声明级重映射翻译"""
+    """状态 → (底色, 边框色)——统一走 theme token：浅色淡底深边，深色暗底亮边，
+    两个主题下状态色都一眼可辨（深色不再残留刺眼浅色块）"""
     t = theme.t
     return {
-        "up":       ("#E6F7EC", "#27AE60"),
-        "down":     ("#EDF1F6", "#AAB8CA"),
-        "trunk":    ("#F4EEFC", "#8E6FD8"),
-        "shutdown": ("#FFECEC", t("danger")),
-        "unknown":  ("#FFFFFF", "#C4CEDC"),
-    }.get(state, ("#FFFFFF", "#C4CEDC"))
+        "up":       (t("port_up_bg"), t("port_up_border")),
+        "down":     (t("port_down_bg"), t("port_down_border")),
+        "trunk":    (t("port_trunk_bg"), t("port_trunk_border")),
+        "shutdown": (t("danger_light"), t("danger")),
+        "unknown":  (t("card"), t("border")),
+    }.get(state, (t("card"), t("border")))
 
 
 class PortCell(QWidget):
@@ -114,7 +115,7 @@ class PortCell(QWidget):
         f = QFont("Microsoft YaHei UI", 13)
         f.setBold(True)
         p.setFont(f)
-        p.setPen(QColor("#1D2129"))
+        p.setPen(QColor(theme.t("text")))          # 主题感知：深色下方块变暗，文字同步提亮
         p.drawText(self.rect().adjusted(0, 0, 0, -18), Qt.AlignCenter, i["label"])
 
         # VLAN 可视化：Access 口且知道 VLAN 时，格子底部画 VLAN 色条 + 小字同色，
@@ -131,7 +132,10 @@ class PortCell(QWidget):
                  "unknown": "无数据"}.get(i["state"], "")
         f2 = QFont("Microsoft YaHei UI", 8)
         p.setFont(f2)
-        p.setPen(QColor(theme.vlan_color(vlan_id)) if vlan_id else QColor(border))
+        # VLAN 小字同色源不变（色条+文字同色便于扫读）；无 VLAN 的口用 text_sub，
+        # 比边框色深一档（视觉审查两轮指出对比不足）
+        p.setPen(QColor(theme.vlan_color(vlan_id)) if vlan_id
+                 else QColor(theme.t("text_sub")))
         p.drawText(QRectF(2, CELL_H - 17, CELL_W - 4, 14), Qt.AlignCenter, small)
 
         # 角标：蓝点=下挂终端 / 紫点=LLDP 邻居
@@ -142,7 +146,7 @@ class PortCell(QWidget):
             p.drawEllipse(dot_x, 5, 6, 6)
             dot_x -= 8
         if i["neighbor"]:
-            p.setBrush(QBrush(QColor("#8E6FD8")))
+            p.setBrush(QBrush(QColor(theme.t("port_trunk_border"))))
             p.setPen(Qt.NoPen)
             p.drawEllipse(dot_x, 5, 6, 6)
         p.end()
@@ -249,16 +253,17 @@ class DevicePanelDialog(BaseDialog):
             grid.setColumnStretch(_PER_ROW, 1)
             ml.addLayout(grid)
         _lg = theme.t
+        _lg_colors = {s: _state_palette(s)[1] for s in ("up", "down", "trunk", "shutdown")}
         legend = QLabel(
             "图例："
-            " <span style='color:#27AE60'>■</span> 链路UP"
-            "　<span style='color:#AAB8CA'>■</span> DOWN"
-            "　<span style='color:#8E6FD8'>■</span> Trunk"
-            "　<span style='color:%s'>■</span> 手工关闭" % _lg("danger")
+            " <span style='color:%s'>■</span> 链路UP" % _lg_colors["up"]
+            + "　<span style='color:%s'>■</span> DOWN" % _lg_colors["down"]
+            + "　<span style='color:%s'>■</span> Trunk" % _lg_colors["trunk"]
+            + "　<span style='color:%s'>■</span> 手工关闭" % _lg_colors["shutdown"]
             + " · <span style='color:%s'>●</span> 下挂终端" % _lg("accent")
-            + "　<span style='color:#8E6FD8'>●</span> LLDP邻居"
-            " · 数字下小字=当前VLAN")
-        legend.setStyleSheet("color: #8A95A6; font-size: 11px; background: transparent;")
+            + "　<span style='color:%s'>●</span> LLDP邻居" % _lg_colors["trunk"]
+            + " · 底部色条/小字同色=同一VLAN")
+        legend.setStyleSheet("color: #5F6B7A; font-size: 12px; background: transparent;")
         legend.setWordWrap(True)
         ml.addWidget(legend)
         ml.addStretch()
@@ -325,7 +330,7 @@ class DevicePanelDialog(BaseDialog):
         self.preview.setPlaceholderText("选中端口并设置参数后，这里实时显示将要下发的命令")
         self.preview.setStyleSheet("QTextEdit { background: #1E2430; color: #D7E1EE;"
                                    "border-radius: 10px; font-family: Consolas;"
-                                   "font-size: 12px; }")
+                                   "font-size: 12px; padding: 10px 12px; }")
         right.addWidget(self.preview, 1)
         body.addLayout(right, 3)
 

@@ -332,7 +332,9 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.comment_btn)
 
         validate_btn = QPushButton("验证配置")
-        validate_btn.setObjectName("ghostButton")
+        # 次级操作档（视觉审查：与同排「导出文件/复制配置」同为次级却用 ghost，
+        # 两档混排观感割裂；统一为 secondary）
+        validate_btn.setObjectName("secondaryButton")
         validate_btn.setToolTip("验证当前配置参数")
         validate_btn.clicked.connect(self.validate_config)
         button_layout.addWidget(validate_btn)

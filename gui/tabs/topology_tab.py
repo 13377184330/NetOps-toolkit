@@ -374,10 +374,10 @@ class DeviceNode(QGraphicsObject):
         painter.drawText(QRectF(-self._w / 2, NODE_ICON_H / 2 + 2, self._w, 20),
                          Qt.AlignHCenter | Qt.AlignVCenter, self.device_name)
 
-        # 副标题（端口 / 型号 / 说明）
+        # 副标题（端口 / 型号 / 说明）：text_sub 比 muted 深一档（视觉审查两轮指出浅色底上辨识不足）
         if self.subtitle:
             painter.setFont(QFont("Microsoft YaHei UI", 9))
-            painter.setPen(QColor(theme.t("text_muted")))
+            painter.setPen(QColor(theme.t("text_sub")))
             painter.drawText(QRectF(-self._w / 2, NODE_ICON_H / 2 + 22, self._w, 18),
                              Qt.AlignHCenter | Qt.AlignVCenter, self.subtitle)
 
@@ -483,7 +483,7 @@ class DeviceNode(QGraphicsObject):
         if self.subtitle:
             fy = rect.bottom() - p["badge_h"] - p["sub_h"] - 8
             painter.setFont(QFont("Microsoft YaHei UI", 9))
-            painter.setPen(QColor(theme.t("text_muted")))
+            painter.setPen(QColor(theme.t("text_sub")))
             painter.drawText(QRectF(rect.left() + 10, fy, p["pw"] - 20, 18),
                              Qt.AlignVCenter | Qt.AlignLeft, self.subtitle)
 
@@ -1211,7 +1211,10 @@ class NetworkTopologyPage(QWidget):
         self.splitter.addWidget(self._build_detail_panel())
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
-        self.splitter.setSizes([9000, 330])
+        # 注意：setSizes 是按比例归一化，不是像素——原 [9000, 330] 实际只分给侧板 ~38px，
+        # 再被最小尺寸提示垫到 ~110px（实测截图「未选择设备」被挤到折行）。
+        # 用真实像素量级 + 侧板 setMinimumWidth(280) 兑现预期宽度
+        self.splitter.setSizes([1000, 300])
         layout.addWidget(self.splitter, 1)
 
         self.status_label = QLabel("尚未连接交换机 —— 点「🔌 一键采集」开始")
@@ -1259,6 +1262,7 @@ class NetworkTopologyPage(QWidget):
     def _build_detail_panel(self):
         """侧边详情面板：选中节点的参数 + 常用操作，单击即联动（不用双击弹窗）"""
         panel = QWidget()
+        panel.setMinimumWidth(280)   # 兑现侧板预期宽度：否则被画布挤到 ~110px，标题折行
         panel.setStyleSheet("""
             QWidget#detailPanel { background: #FFFFFF; border: 1px solid #DFE6F0;
                                   border-radius: 12px; }

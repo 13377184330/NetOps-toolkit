@@ -10,8 +10,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QTextEdit, QLineEdit,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QDialog, QDialogButtonBox,
-                              QSpinBox, QSplitter, QInputDialog)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+                              QSpinBox, QSplitter, QInputDialog, QLabel)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QEvent
 
 from utils.device_store import DeviceStore
 from utils.credential_crypto import decrypt
@@ -171,13 +171,19 @@ class DeviceOpsTab(QWidget):
         top_layout.addWidget(self.table)
 
         # 按钮行：两排小按钮（窄视口友好），按钮紧凑化
+        # 按档位语义上角色（视觉审查：原本全为默认样式，与四档语义体系不一致）
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         self.add_btn = QPushButton("＋ 新增")
+        self.add_btn.setObjectName("primaryButton")
         self.edit_btn = QPushButton("编辑")
+        self.edit_btn.setObjectName("secondaryButton")
         self.del_btn = QPushButton("删除")
+        self.del_btn.setObjectName("dangerGhostButton")
         self.test_btn = QPushButton("测试连通（SSH 登录）")
+        self.test_btn.setObjectName("secondaryButton")
         self.probe_btn = QPushButton("批量探测（TCP）")
+        self.probe_btn.setObjectName("secondaryButton")
         for b in (self.add_btn, self.edit_btn, self.del_btn, self.test_btn, self.probe_btn):
             b.setStyleSheet("padding: 11px 16px;")
         for b in (self.add_btn, self.edit_btn, self.del_btn):
@@ -186,6 +192,14 @@ class DeviceOpsTab(QWidget):
         btn_row.addWidget(self.test_btn)
         btn_row.addWidget(self.probe_btn)
         top_layout.addLayout(btn_row)
+
+        # 空表引导（视觉审查：无数据时一片空白，分不清“没加载”还是“没设备”）
+        self._empty_hint = QLabel("暂无设备——点击「＋ 新增」登记第一台设备", self.table)
+        self._empty_hint.setAlignment(Qt.AlignCenter)
+        self._empty_hint.setStyleSheet(
+            "color: #8A95A6; font-size: 13px; background: transparent;")
+        self._empty_hint.hide()
+        self.table.installEventFilter(self)
 
         self.add_btn.clicked.connect(self.add_device)
         self.edit_btn.clicked.connect(self.edit_device)
@@ -208,6 +222,7 @@ class DeviceOpsTab(QWidget):
         self.cmd_input.setPlaceholderText("输入回显命令，如 display version / show ip interface brief")
         self.cmd_input.setMinimumWidth(180)
         self.cmd_btn = QPushButton("执行命令")
+        self.cmd_btn.setObjectName("secondaryButton")
         self.cmd_btn.setStyleSheet("padding: 11px 16px;")
         cmd_row.addWidget(self.cmd_input, 4)
         cmd_row.addWidget(self.cmd_btn, 0)
@@ -217,7 +232,9 @@ class DeviceOpsTab(QWidget):
         deploy_row = QHBoxLayout()
         deploy_row.setSpacing(8)
         self.deploy_btn = QPushButton("下发配置到选中设备")
+        self.deploy_btn.setObjectName("primaryButton")
         self.backup_btn = QPushButton("备份选中设备配置")
+        self.backup_btn.setObjectName("secondaryButton")
         for b in (self.deploy_btn, self.backup_btn):
             b.setStyleSheet("padding: 11px 16px;")
         deploy_row.addWidget(self.deploy_btn)
@@ -314,6 +331,25 @@ class DeviceOpsTab(QWidget):
                     item = QTableWidgetItem(str(v))
                 self.table.setItem(r, c, item)
         self.table.setSortingEnabled(True)
+        self._sync_empty_hint()
+
+    # ---------------- 空表引导 ----------------
+    def _sync_empty_hint(self):
+        """无设备时表格中央给引导文案（空表别是一片白，分不清“没加载”还是“没设备”）"""
+        empty = self.table.rowCount() == 0
+        self._empty_hint.setVisible(empty)
+        if empty:
+            self._move_empty_hint()
+
+    def _move_empty_hint(self):
+        self._empty_hint.setGeometry(0, max(30, self.table.height() // 2 - 12),
+                                     self.table.width(), 24)
+
+    def eventFilter(self, obj, ev):
+        if obj is self.table and ev.type() == QEvent.Resize:
+            if self._empty_hint.isVisible():
+                self._move_empty_hint()
+        return super().eventFilter(obj, ev)
 
     def add_device(self):
         dlg = DeviceDialog(parent=self)

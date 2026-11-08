@@ -26,6 +26,7 @@ TEXT_SUB = "#5F6B7A"      # 次文字（#7A8699 在 #ECF0F6 上仅 3.2:1，不�
 TEXT_MUTED = "#8A95A6"    # 装饰性弱文字（不承载信息时用）
 DISABLED_BG = "#F5F7FA"
 DISABLED_TEXT = "#B3BCCB"
+TRACK = "#E8EDF5"        # 分段控件轨道/表头底（比白卡片深一档，拉开层级）
 
 # 图标：QSS 画不出三角形/对勾，用运行时生成的 PNG（见 gui/ui_assets.py）
 from gui.ui_assets import URL_CHEVRON_DOWN, URL_CHEVRON_UP, URL_CHECK_WHITE
@@ -537,7 +538,7 @@ QHeaderView {{
 }}
 
 QHeaderView::section {{
-    background: #F7F9FC;
+    background: {TRACK};
     color: {TEXT_SUB};
     padding: 12px 10px;
     border: none;
