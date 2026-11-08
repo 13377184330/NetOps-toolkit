@@ -337,6 +337,23 @@ def install():
     _orig_setStyleSheet = QWidget.setStyleSheet
     QWidget.setStyleSheet = _patched_setStyleSheet
 
+    # QMenu 补丁：popup 窗口默认不透明，QSS 的圆角只剪绘制、剪不掉原生窗口矩形，
+    # 四角与底边残留白色直角块（真机截图反馈）。构造即设 translucent，
+    # menubar.addMenu / 右键 QMenu / QSS 圆角全部一处生效。
+    from PyQt5.QtCore import Qt as _Qt
+    from PyQt5.QtWidgets import QMenu as _QMenu
+    global _orig_menu_init
+    if _orig_menu_init is None:
+        _orig_menu_init = _QMenu.__init__
+
+        def _menu_init(self, *args, **kwargs):
+            _orig_menu_init(self, *args, **kwargs)
+            self.setAttribute(_Qt.WA_TranslucentBackground)
+        _QMenu.__init__ = _menu_init
+
+
+_orig_menu_init = None
+
 
 # ---------------- 切换 ----------------
 
