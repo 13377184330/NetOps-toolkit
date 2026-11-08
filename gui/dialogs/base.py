@@ -23,7 +23,7 @@ v2 动机（真机截图反馈）：子窗口此前仍用系统原生标题栏�
 info_box/warn_box/error_box/question_box）签名与语义保持 v1 不变。
 """
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QPoint, QRect, Qt
 from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
@@ -225,16 +225,32 @@ class BaseDialog(QDialog):
         painter.setBrush(theme.qcolor("bg"))
         painter.drawRoundedRect(1, 1, self.width() - 2, self.height() - 2, 11, 11)
 
-    # ---- 首次显示居中于父窗口（无边框窗口不保证自动居中） ----
+    # ---- 首次显示：居中于父窗口（无边框窗口必须自己摆位） ----
     def showEvent(self, event):
         super().showEvent(event)
         if not self._centered:
             self._centered = True
-            parent = self.parent()
-            if parent is not None and parent.isVisible():
-                pg = parent.frameGeometry()
-                fg = self.frameGeometry()
-                self.move(pg.center() - fg.center())
+            self._center_on_parent()
+
+    def _center_on_parent(self):
+        """把子窗口摆在父窗口正中，并钳制在屏幕可用区内（绝不越界出屏）。
+        注意：非顶层控件（如拓扑页 page）的 frameGeometry() 是**父坐标系**坐标，
+        不能直接当屏幕坐标用（曾把弹窗移到左上角、左侧切字，真机截图实锤）；
+        必须 mapToGlobal 转全局。父不可见时退回屏幕居中。"""
+        fg = self.frameGeometry()
+        parent = self.parent()
+        if parent is not None and parent.isVisible():
+            top_left = parent.mapToGlobal(QPoint(0, 0))
+            ref = QRect(top_left, parent.size())
+        else:
+            ref = QApplication.primaryScreen().availableGeometry()
+        x = ref.left() + (ref.width() - fg.width()) // 2
+        y = ref.top() + (ref.height() - fg.height()) // 2
+        # 屏幕四边钳制：即使公式/参考区异常，也绝不越出可用区
+        scr = QApplication.primaryScreen().availableGeometry()
+        x = max(scr.left(), min(x, scr.right() - fg.width()))
+        y = max(scr.top(), min(y, scr.bottom() - fg.height()))
+        self.move(x, y)
 
     # ---- 对外接口（与 v1 兼容） ----
     def content_layout(self):
