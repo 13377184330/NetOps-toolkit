@@ -688,98 +688,42 @@ class MainWindow(QMainWindow):
         file_menu.addAction(exit_action)
         
         tools_menu = menubar.addMenu("网络工具(&T)")
-        
-        subnet_action = QAction("子网计算器", self)
-        subnet_action.triggered.connect(lambda: self.open_network_tool("subnet"))
-        tools_menu.addAction(subnet_action)
-        
-        ping_action = QAction("Ping测试", self)
-        ping_action.triggered.connect(lambda: self.open_network_tool("ping"))
-        tools_menu.addAction(ping_action)
-        
-        port_action = QAction("端口扫描", self)
-        port_action.triggered.connect(lambda: self.open_network_tool("port"))
-        tools_menu.addAction(port_action)
-        
-        trace_action = QAction("路由跟踪", self)
-        trace_action.triggered.connect(lambda: self.open_network_tool("trace"))
-        tools_menu.addAction(trace_action)
-        
-        dns_action = QAction("DNS/Whois查询", self)
-        dns_action.triggered.connect(lambda: self.open_network_tool("dns"))
-        tools_menu.addAction(dns_action)
-        
-        http_action = QAction("HTTP状态检测", self)
-        http_action.triggered.connect(lambda: self.open_network_tool("http"))
-        tools_menu.addAction(http_action)
-        
-        mac_action = QAction("MAC地址查询", self)
-        mac_action.triggered.connect(lambda: self.open_network_tool("mac"))
-        tools_menu.addAction(mac_action)
-        
+
+        # 菜单是入口不是清单：总入口（工具箱网格含全部 17 个工具卡片）+
+        # 高频 5 项直达 + 带全局快捷键的 3 项（保留肌肉记忆，删了快捷键就失效）。
+        # （历史版本 18 项一列垂到屏底，真机截图反馈“左右失衡”）
+        all_tools_action = QAction("🧰 打开工具箱（全部工具）", self)
+        all_tools_action.setShortcut("Ctrl+T")
+        all_tools_action.triggered.connect(self.open_tools_window)
+        tools_menu.addAction(all_tools_action)
+
         tools_menu.addSeparator()
-        
-        convert_action = QAction("跨厂商配置转换", self)
-        convert_action.triggered.connect(lambda: self.open_network_tool("convert"))
-        tools_menu.addAction(convert_action)
-        
-        lint_action = QAction("配置语法纠错", self)
-        lint_action.triggered.connect(lambda: self.open_network_tool("lint"))
-        tools_menu.addAction(lint_action)
-        
-        batch_action = QAction("批量生成（CSV）", self)
-        batch_action.triggered.connect(lambda: self.open_network_tool("batch"))
-        tools_menu.addAction(batch_action)
-        
-        onboard_action = QAction("一键标准化开局", self)
-        onboard_action.triggered.connect(lambda: self.open_network_tool("onboard"))
-        tools_menu.addAction(onboard_action)
-        
+
+        for label, key in (("Ping 测试", "ping"),
+                           ("端口扫描", "port"),
+                           ("子网计算器", "subnet"),
+                           ("跨厂商配置转换", "convert"),
+                           ("批量生成（CSV）", "batch")):
+            act = QAction(label, self)
+            act.triggered.connect(lambda _=False, k=key: self.open_network_tool(k))
+            tools_menu.addAction(act)
+
         tools_menu.addSeparator()
-        
-        nlgen_action = QAction("自然语言生成配置", self)
-        nlgen_action.triggered.connect(lambda: self.open_network_tool("nlgen"))
-        tools_menu.addAction(nlgen_action)
-        
-        trouble_action = QAction("排错·重置命令", self)
-        trouble_action.triggered.connect(lambda: self.open_network_tool("trouble"))
-        tools_menu.addAction(trouble_action)
-        
-        tools_menu.addSeparator()
-        
-        password_action = QAction("密码生成器", self)
-        password_action.triggered.connect(lambda: self.open_network_tool("password"))
-        tools_menu.addAction(password_action)
-        
-        encoder_action = QAction("编码转换器", self)
-        encoder_action.triggered.connect(lambda: self.open_network_tool("encoder"))
-        tools_menu.addAction(encoder_action)
-        
-        tools_menu.addSeparator()
-        
+
         manual_action = QAction("配置命令手册", self)
         manual_action.setShortcut("Ctrl+M")
         manual_action.triggered.connect(lambda: self.open_network_tool("manual"))
         tools_menu.addAction(manual_action)
-        
-        tools_menu.addSeparator()
-        
+
         compare_action = QAction("配置比较工具", self)
         compare_action.setShortcut("Ctrl+Shift+C")
         compare_action.triggered.connect(lambda: self.open_network_tool("compare"))
         tools_menu.addAction(compare_action)
-        
+
         io_action = QAction("配置导入导出", self)
         io_action.setShortcut("Ctrl+I")
         io_action.triggered.connect(lambda: self.open_network_tool("configio"))
         tools_menu.addAction(io_action)
-        
-        tools_menu.addSeparator()
-        
-        all_tools_action = QAction("打开工具箱", self)
-        all_tools_action.setShortcut("Ctrl+T")
-        all_tools_action.triggered.connect(self.open_tools_window)
-        tools_menu.addAction(all_tools_action)
         
         template_menu = menubar.addMenu("模板(&M)")
         

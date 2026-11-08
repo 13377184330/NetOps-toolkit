@@ -794,9 +794,9 @@ class TopologyScene(QGraphicsScene):
                 for hi, node in enumerate(groups[key]):
                     node.setPos(gx + (hi % 2) * 170 - 85, 430 + (hi // 2) * 124)
 
-        views = self.views()
-        if views:
-            views[0].centerOn(0, 160)
+        # 空状态/采集后通用：布局完成由页面按钮的 fit_content 统一适配视口。
+        # （历史版本尾部 centerOn(0,160) 硬编码场景点，把视口中心对到节点群下方，
+        # 内容悬在视口上部——真机截图反馈“画面飘移”，已删）
 
 
 # ---------------------------------------------------------------- 画布视图（点阵背景）
@@ -828,10 +828,27 @@ class TopologyView(QGraphicsView):
             x += step
 
     def wheelEvent(self, event):
+        self._keep_center = False   # 用户主动缩放：不再自动对中（免得对着光标缩放被拽回）
         factor = 1.12 if event.angleDelta().y() > 0 else 1 / 1.12
         cur = self.transform().m11()
         if 0.45 <= cur * factor <= 2.6:
             self.scale(factor, factor)
+
+    def mousePressEvent(self, event):
+        self._keep_center = False   # 手动平移同理
+        super().mousePressEvent(event)
+
+    def resizeEvent(self, event):
+        """视口尺寸变化（splitter 重新分配/窗口缩放）时保持内容居中。
+        QSplitter 的尺寸是异步稳定的：fit_content 后 processEvents 一轮视口宽
+        可变 180px+，QGraphicsView 对 resize 的默认补偿会把场景中心点拖偏
+        ~120px（真机反馈「画面飘移」的实测根因）。fit 之后短暂接管，
+        用户一动手（缩放/拖动）就交还控制。"""
+        super().resizeEvent(event)
+        if getattr(self, "_keep_center", False) and self.scene() is not None:
+            rect = self.scene().itemsBoundingRect()
+            if not rect.isNull() and not rect.isEmpty():
+                self.centerOn(rect.center())
 
     def fit_content(self):
         """缩放到刚好装下全部节点（留边距），文字仍可读"""
@@ -839,6 +856,9 @@ class TopologyView(QGraphicsView):
         rect = scene.itemsBoundingRect()
         if rect.isNull() or rect.isEmpty():
             return
+        # sceneRect 跟随内容放大：固定 1800 宽的旧值比缩放后的视口视野还窄时，
+        # 视口会被 sceneRect 钳死无法滚动，centerOn 静默失效 → 内容偏在一边
+        self.setSceneRect(rect.adjusted(-900, -700, 900, 700))
         self.fitInView(rect.adjusted(-70, -50, 70, 50), Qt.KeepAspectRatio)
         s = self.transform().m11()
         if s > 1.15:      # 内容很少时不要放太大（放大会跑到左上角）
@@ -847,6 +867,7 @@ class TopologyView(QGraphicsView):
             f = 0.72 / s
             self.scale(f, f)
         self.centerOn(rect.center())
+        self._keep_center = True    # 视口后续 resize（splitter 异步）时保持居中
 
 
 # ---------------------------------------------------------------- 通用对话框
@@ -1161,7 +1182,7 @@ class NetworkTopologyPage(QWidget):
         ports_btn.clicked.connect(self.show_port_table)
 
         layout_btn = make_button("自动布局", "secondary")
-        layout_btn.clicked.connect(lambda: self.scene.auto_layout())
+        layout_btn.clicked.connect(self._do_auto_layout)
 
         fit_btn = make_button("适应窗口", "ghost")
         fit_btn.clicked.connect(lambda: self.view.fit_content())
@@ -1370,6 +1391,11 @@ class NetworkTopologyPage(QWidget):
         self.view.fit_content()
 
     # ---------------- 采集入口 ----------------
+    def _do_auto_layout(self):
+        """自动布局 = 重排列节点 + 视图适配到内容（用户预期：点完看到整齐居中的全图）"""
+        self.scene.auto_layout()
+        self.view.fit_content()
+
     def collect_now(self):
         """不离开本页直接采集：调用 Console 页的采集流程（复用同一套逻辑）"""
         main = self.window()
