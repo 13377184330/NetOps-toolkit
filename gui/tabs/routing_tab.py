@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QComboBox, QPushButton, QListWidget, QLabel)
 from PyQt5.QtCore import Qt
 from gui.dialogs.base import warn_box
+from gui.widget_utils import page_header
 from modules.routing_config import RoutingConfigGenerator
 
 
@@ -24,6 +25,8 @@ class RoutingConfigTab(QWidget):
     
     def initUI(self):
         layout = QVBoxLayout(self)
+        layout.addWidget(page_header(
+            "路由配置", "静态路由、OSPF、BGP、RIP"))
         
         left_panel = QVBoxLayout()
         

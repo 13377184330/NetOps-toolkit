@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QTextEdit, QLabel)
 from PyQt5.QtCore import Qt
 from gui.dialogs.base import info_box, warn_box
+from gui.widget_utils import page_header
 from modules.vlan_config import VLANConfigGenerator
 
 
@@ -25,6 +26,8 @@ class VLANConfigTab(QWidget):
     
     def initUI(self):
         layout = QVBoxLayout(self)
+        layout.addWidget(page_header(
+            "VLAN配置", "VLAN 划分、接口接入模式、VLANIF 网关与 STP"))
         
         left_panel = QVBoxLayout()
         

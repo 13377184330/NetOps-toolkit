@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (QComboBox, QFormLayout, QGroupBox, QHBoxLayout,
                              QScrollArea, QVBoxLayout, QWidget)
 
 from gui.dialogs.base import info_box, warn_box
+from gui.widget_utils import page_header
 from modules.adv_modules import MODULES
 from modules.nl_engine import VENDOR_CN
 
@@ -30,6 +31,8 @@ class AdvConfigTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
+        layout.addWidget(page_header(
+            "高级配置", "模块化进阶功能按需叠加，生成后并入总配置"))
 
         # 模块选择卡
         pick_group = QGroupBox("选择高级模块")

@@ -38,6 +38,7 @@ from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboB
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
 from gui.dialogs.base import (BaseDialog, make_button, info_box, warn_box,
                               question_box)
+from gui.widget_utils import page_header
 from gui import theme
 from modules.config_visualizer import expand_vlan_body
 from modules.nl_engine import e_port_access, e_port_trunk
@@ -178,16 +179,29 @@ class LinkItem(QGraphicsItem):
 
     def boundingRect(self):
         pa, pb = self.a.scenePos(), self.b.scenePos()
-        return QRectF(pa, pb).normalized().adjusted(-110, -50, 110, 50)
+        # 曲线最大法向偏移 36，中点偏移为其半；标签胶囊最宽 ~110
+        return QRectF(pa, pb).normalized().adjusted(-110, -70, 110, 70)
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.Antialiasing)
         pa, pb = self.a.scenePos(), self.b.scenePos()
         painter.setPen(self._pen())
-        painter.drawLine(pa, pb)
+        # 圆角连线：二次贝塞尔（draw.io / NetBox 拓扑的标准画法）——控制点
+        # 取弦中点沿法线偏移，短链弯度小、长链弯度大且有上限，避开“硬直线”
+        d = pb - pa
+        dist = (d.x() ** 2 + d.y() ** 2) ** 0.5 or 1.0
+        k = max(14.0, min(dist * 0.10, 36.0))
+        ctrl = QPointF((pa.x() + pb.x()) / 2 + d.y() / dist * k,
+                       (pa.y() + pb.y()) / 2 - d.x() / dist * k)
+        path = QPainterPath()
+        path.moveTo(pa)
+        path.quadTo(ctrl, pb)
+        painter.drawPath(path)
         if not self.label:
             return
-        mid = (pa + pb) / 2
+        # 标签贴在曲线真实中点（贝塞尔中点 = 0.25A + 0.5C + 0.25B）
+        mid = QPointF(0.25 * pa.x() + 0.5 * ctrl.x() + 0.25 * pb.x(),
+                      0.25 * pa.y() + 0.5 * ctrl.y() + 0.25 * pb.y())
         font = QFont("Microsoft YaHei UI", 9)
         if self.state == "up":
             font.setBold(True)
@@ -1154,6 +1168,8 @@ class NetworkTopologyPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
+        layout.addWidget(page_header(
+            "网络拓扑", "LLDP 邻居自动成图，链路状态实时标注（采集只读，不下发配置）"))
 
         bar = QHBoxLayout()
         bar.setSpacing(8)

@@ -17,6 +17,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, pyqtSlot
 import re
 
 from gui.dialogs.base import error_box, info_box, warn_box, question_box
+from gui.widget_utils import page_header
 from modules import config_visualizer as cv
 from modules import console_reader as cr
 from modules.device_connector import VENDOR_LABELS
@@ -143,6 +144,8 @@ class ConsoleVizTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(14)
+        layout.addWidget(page_header(
+            "Console 可视化", "插线只读采集 running-config，分层配置树 + 配置健康度体检"))
 
         # 连接卡（控件间放宽间隔 + 弹性分配，不挤左边）
         conn_group = QGroupBox("Console 连接")

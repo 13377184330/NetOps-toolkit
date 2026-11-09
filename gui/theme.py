@@ -90,6 +90,7 @@ DARK = {
     "bg":            "#171C24",
     "card":          "#232B37",
     "card_alt":      "#1D2430",
+    "input_bg":      "#1B2430",   # 输入控件底（比卡片暗一档，内嵌感；层次 P2）
     "zebra":         "#202734",
     "track":         "#2A3340",
     "disabled_bg":   "#202836",
@@ -184,6 +185,7 @@ _FG_PROPS = {"color", "selection-color"}
 _SURFACE_MAP = {
     "#FFFFFF": DARK["card"],
     "#FFF": DARK["card"],
+    "#FCFDFE": DARK["input_bg"],   # 输入控件底（styles.py INPUT_BG）
     "#F7F9FC": DARK["card_alt"],
     "#FAFBFD": DARK["zebra"],
     "#F5F7FA": DARK["disabled_bg"],

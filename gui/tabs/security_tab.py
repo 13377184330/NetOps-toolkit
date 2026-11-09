@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QRadioButton, QButtonGroup, QLabel)
 from PyQt5.QtCore import Qt
 from gui.dialogs.base import info_box, warn_box
+from gui.widget_utils import page_header
 from modules.security_config import SecurityConfigGenerator
 
 
@@ -25,6 +26,8 @@ class SecurityConfigTab(QWidget):
     
     def initUI(self):
         layout = QVBoxLayout(self)
+        layout.addWidget(page_header(
+            "安全配置", "ACL 过滤、端口安全、DHCP Snooping、ARP 防护与风暴抑制"))
         
         left_panel = QVBoxLayout()
         

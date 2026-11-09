@@ -16,6 +16,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QEvent
 from utils.device_store import DeviceStore
 from utils.credential_crypto import decrypt
 from gui.dialogs.base import info_box, question_box, warn_box
+from gui.widget_utils import page_header
 from modules import device_connector as dc
 from modules.device_connector import VENDOR_LABELS
 
@@ -136,6 +137,8 @@ class DeviceOpsTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(14)
+        layout.addWidget(page_header(
+            "设备运维", "设备清单、连通测试、命令执行与配置备份下发（凭据本地加密）"))
 
         splitter = QSplitter(Qt.Vertical)
         splitter.setHandleWidth(6)

@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QComboBox, QTextEdit, QScrollArea, QFrame)
 from PyQt5.QtCore import Qt
 from modules.basic_config import BasicConfigGenerator
+from gui.widget_utils import page_header
 
 
 class BasicConfigTab(QWidget):
@@ -26,6 +27,8 @@ class BasicConfigTab(QWidget):
         container = QWidget()
         main_layout = QVBoxLayout(container)
         main_layout.setSpacing(15)
+        main_layout.addWidget(page_header(
+            "基础配置", "系统标识、管理接口与 SSH/Telnet、SNMP/NTP 等开局基础项"))
         
         system_group = QGroupBox("系统配置")
         system_layout = QFormLayout()

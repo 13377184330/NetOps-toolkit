@@ -8,6 +8,31 @@ from PyQt5.QtCore import Qt
 _SORT_ROLE = Qt.UserRole + 1
 
 
+def page_header(title, subtitle=""):
+    """页面级标题（页内容区统一层级）。
+
+    各内容页原本直接铺 QGroupBox 卡片，切页后只有导航知道自己在哪，
+    内容区零上下文。统一加「标题 17px 加粗 + 副标题 13px 次要色」，
+    层级与 BaseDialog 标题栏/消息框同语言。颜色用浅色词内联，
+    深色主题由 theme.py 的 setStyleSheet 补丁声明级重映射翻译。
+    """
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(4, 0, 4, 0)
+    lay.setSpacing(3)
+    t = QLabel(title)
+    t.setStyleSheet(
+        "font-size: 17px; font-weight: bold; color: #1F2A37; background: transparent;")
+    lay.addWidget(t)
+    if subtitle:
+        s = QLabel(subtitle)
+        s.setStyleSheet(
+            "font-size: 13px; color: #5F6B7A; background: transparent;")
+        lay.addWidget(s)
+    return w
+
+
 def scroll_wrap(widget):
     """页面滚动包装：视口装不下时出滚动条（横纵皆可），绝不压缩表单卡片
     - 输入控件设最小宽，保证占位提示可读

@@ -161,7 +161,12 @@ class PingTestWidget(QWidget):
         polish_table(self.batch_table)
         self.batch_table.setColumnCount(6)
         self.batch_table.setHorizontalHeaderLabels(["主机", "状态", "发送", "接收", "丢失率", "平均延迟"])
-        self.batch_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # 列宽自适应（P2 修复）：此前六列全 Stretch 平分宽度——数值列浪费、
+        # 主机列不够放长 IP。改为数值列随内容收紧 + 主机列吃剩余宽度
+        # （与设备运维表/mac 工具同款模式）
+        _header = self.batch_table.horizontalHeader()
+        _header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        _header.setSectionResizeMode(0, QHeaderView.Stretch)
         self.batch_table.setMinimumHeight(200)
         batch_layout.addWidget(self.batch_table)
         

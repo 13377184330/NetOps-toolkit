@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QScrollArea, QFrame)
 from PyQt5.QtCore import Qt
 from gui.dialogs.base import warn_box
+from gui.widget_utils import page_header
 from modules.interface_config import InterfaceConfigGenerator
 
 
@@ -31,6 +32,8 @@ class InterfaceConfigTab(QWidget):
         
         container = QWidget()
         layout = QVBoxLayout(container)
+        layout.addWidget(page_header(
+            "接口配置", "端口聚合、LLDP、环路检测、PoE 与接口限速"))
         
         left_panel = QVBoxLayout()
         left_panel.setSpacing(15)

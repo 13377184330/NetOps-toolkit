@@ -19,6 +19,7 @@ WARNING = "#FA9D3B"
 WARNING_HOVER = "#E88E2F"
 BG = "#ECF0F6"            # 窗口底（略深一档，衬托白卡片）
 CARD = "#FFFFFF"          # 卡片底
+INPUT_BG = "#FCFDFE"      # 输入控件底（与卡片区分开一层；深色主题映射为暗一档的 input_bg）
 BORDER = "#DFE6F0"        # 中性细边
 BORDER_STRONG = "#C9D4E3"  # hover 边
 TEXT = "#1F2A37"          # 主文字
@@ -86,7 +87,7 @@ QLineEdit {{
     padding: 10px 14px;
     border: 1px solid {BORDER};
     border-radius: 11px;
-    background: {CARD};
+    background: {INPUT_BG};
     color: {TEXT};
     font-size: 14px;
     selection-background-color: {ACCENT};
@@ -100,7 +101,7 @@ QLineEdit:hover {{
 QLineEdit:focus {{
     border: 2px solid {ACCENT};
     padding: 9px 13px;
-    background: {CARD};
+    background: {INPUT_BG};
 }}
 
 QLineEdit:disabled {{
@@ -113,7 +114,7 @@ QSpinBox, QDoubleSpinBox {{
     padding: 6px 10px 6px 12px;
     border: 1px solid {BORDER};
     border-radius: 10px;
-    background: {CARD};
+    background: {INPUT_BG};
     color: {TEXT};
     font-size: 13px;
 }}
@@ -158,7 +159,7 @@ QComboBox {{
     padding: 10px 14px;
     border: 1px solid {BORDER};
     border-radius: 11px;
-    background: {CARD};
+    background: {INPUT_BG};
     color: {TEXT};
     font-size: 14px;
     min-width: 6em;
@@ -327,7 +328,7 @@ QListWidget::item:hover:!selected {{
 QTextEdit, QPlainTextEdit {{
     border: 1px solid {BORDER};
     border-radius: 12px;
-    background: {CARD};
+    background: {INPUT_BG};
     color: {TEXT};
     padding: 12px;
     font-family: "Consolas", "Microsoft YaHei UI", monospace;
@@ -358,7 +359,7 @@ QCheckBox::indicator {{
     height: 19px;
     border-radius: 6px;
     border: 1px solid #C9D4E3;
-    background: {CARD};
+    background: {INPUT_BG};
 }}
 
 QCheckBox::indicator:hover {{
@@ -392,7 +393,7 @@ QRadioButton::indicator {{
     height: 19px;
     border-radius: 10px;
     border: 1px solid #C9D4E3;
-    background: {CARD};
+    background: {INPUT_BG};
 }}
 
 QRadioButton::indicator:hover {{
