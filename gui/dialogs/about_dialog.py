@@ -4,31 +4,27 @@
 关于对话框
 """
 
-from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                             QPushButton, QTabWidget, QWidget, QTextBrowser)
+from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel,
+                             QTabWidget, QWidget, QTextBrowser)
 from PyQt5.QtCore import Qt
 
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, ACCENT, TEXT, TEXT_SUB
+from gui.styles import ACCENT, TEXT, TEXT_SUB
+from gui.dialogs.base import BaseDialog
 
 
-class AboutDialog(QDialog):
-    """关于对话框"""
+class AboutDialog(BaseDialog):
+    """关于对话框（统一无边框子窗口骨架）"""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__("关于 NetOps Toolkit", "", parent, min_width=560, min_height=460)
         self.initUI()
 
     def initUI(self):
-        self.setWindowTitle("关于 NetOps Toolkit")
-        self.setFixedSize(560, 460)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 22, 24, 18)
+        layout = self.content_layout()
         layout.setSpacing(14)
 
         # ---------- 头部 ----------
@@ -63,13 +59,7 @@ class AboutDialog(QDialog):
         layout.addWidget(tabs, 1)
 
         # ---------- 底部 ----------
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        ok_btn = QPushButton("确定")
-        ok_btn.setObjectName("primaryButton")
-        ok_btn.clicked.connect(self.accept)
-        btn_row.addWidget(ok_btn)
-        layout.addLayout(btn_row)
+        self.add_button("确定", "primary")
 
     @staticmethod
     def _page(html):

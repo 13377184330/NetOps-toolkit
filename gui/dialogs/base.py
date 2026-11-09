@@ -290,12 +290,37 @@ class BaseDialog(QDialog):
         painter.setBrush(theme.qcolor("bg"))
         painter.drawRoundedRect(1, 1, self.width() - 2, self.height() - 2, 11, 11)
 
-    # ---- 首次显示：居中于父窗口（无边框窗口必须自己摆位） ----
+    # ---- 首次显示：按内容定尺寸 + 居中于父窗口（无边框窗口必须自己摆位） ----
     def showEvent(self, event):
         super().showEvent(event)
         if not self._centered:
             self._centered = True
+            self._fit_to_content()
             self._center_on_parent()
+
+    def _fit_to_content(self):
+        """首次 show 时按内容 sizeHint 定尺寸（高 DPI 小逻辑屏的压碎修复）。
+
+        根因（真机截图实证）：Qt 对顶层窗口的自动尺寸会硬钳到屏幕 2/3
+        （QWidgetPrivate::adjustedSize），1280×800@200% 逻辑屏上设置对话框
+        被压到 533 高，而内容真实需要 601——布局只能把子控件压到最小
+        （下拉框 42→8px）；QTabWidget 标签栏首次 show 前 sizeHint 还偏小
+        （601→545），所以必须 ensurePolished + activate 后再量。
+        这里显式定尺寸，上限仍守 85% 可用高度：内容超限的对话框应配
+        scrollable=True。子类若已显式 resize（WA_Resized），尊重其意图。
+        """
+        if self.testAttribute(Qt.WA_Resized):
+            return
+        self.ensurePolished()
+        if self.layout() is not None:
+            self.layout().activate()
+        hint = self.sizeHint().expandedTo(self.minimumSize())
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            hint.setHeight(min(hint.height(), int(avail.height() * _MAX_SCREEN_RATIO)))
+            hint.setWidth(min(hint.width(), int(avail.width() * 0.92)))
+        self.resize(hint)
 
     def _center_on_parent(self):
         """把子窗口摆在父窗口正中，并钳制在屏幕可用区内（绝不越界出屏）。

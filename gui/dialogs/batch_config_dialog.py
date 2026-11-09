@@ -16,7 +16,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
-from gui.dialogs.base import info_box, warn_box, error_box
+from gui.dialogs.base import (BaseDialog, make_button, info_box, warn_box,
+                             error_box)
 from modules.basic_config import BasicConfigGenerator
 
 
@@ -130,27 +131,22 @@ class BatchGenerateWorker(QThread):
         return '\n'.join(config_lines)
 
 
-class BatchConfigDialog(QDialog):
-    """批量配置生成对话框"""
+class BatchConfigDialog(BaseDialog):
+    """批量配置生成对话框（统一无边框子窗口骨架）"""
     
     def __init__(self, parent=None, device_type='huawei'):
-        super().__init__(parent)
         self.device_type = device_type
         self.worker = None
         self.results = []
+        super().__init__("批量配置生成", "", parent, min_width=900, min_height=600)
         self.initUI()
     
     def initUI(self):
-        self.setWindowTitle("批量配置生成")
-        self.setMinimumSize(900, 600)
-        self.setStyleSheet(MODERN_STYLE + TOOLTIP_STYLE + DIALOG_STYLE)
-        
-        layout = QVBoxLayout(self)
+        layout = self.content_layout()
         layout.setSpacing(12)
         
-        settings_group = QWidget()
-        settings_layout = QHBoxLayout(settings_group)
-        settings_layout.setContentsMargins(0, 0, 0, 0)
+        settings_layout = QHBoxLayout()
+        settings_layout.setSpacing(10)
         
         type_label = QLabel("设备类型:")
         type_label.setStyleSheet("font-weight: bold;")
@@ -159,26 +155,25 @@ class BatchConfigDialog(QDialog):
         self.device_combo = QComboBox()
         self.device_combo.addItems(["华为 (Huawei)", "H3C (华三)"])
         self.device_combo.setCurrentIndex(0 if self.device_type == 'huawei' else 1)
+        self.device_combo.setMinimumHeight(40)
+        self.device_combo.setMinimumWidth(160)
         settings_layout.addWidget(self.device_combo)
         
         settings_layout.addStretch()
         
-        add_row_btn = QPushButton("➕ 添加设备")
-        add_row_btn.setObjectName("primaryButton")
+        add_row_btn = make_button("添加设备", "secondary")
         add_row_btn.clicked.connect(self.add_device_row)
         settings_layout.addWidget(add_row_btn)
         
-        del_row_btn = QPushButton("➖ 删除选中")
-        del_row_btn.setObjectName("ghostButton")
+        del_row_btn = make_button("删除选中", "ghost")
         del_row_btn.clicked.connect(self.remove_selected_row)
         settings_layout.addWidget(del_row_btn)
         
-        clear_btn = QPushButton("清空列表")
-        clear_btn.setObjectName("ghostButton")
+        clear_btn = make_button("清空列表", "ghost")
         clear_btn.clicked.connect(self.clear_devices)
         settings_layout.addWidget(clear_btn)
         
-        layout.addWidget(settings_group)
+        layout.addLayout(settings_layout)
         
         self.device_table = QTableWidget()
         from gui.widget_utils import polish_table
@@ -188,20 +183,16 @@ class BatchConfigDialog(QDialog):
         self.device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.device_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.device_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
-        self.device_table.setMinimumHeight(200)
-        layout.addWidget(self.device_table)
+        self.device_table.setMinimumHeight(160)
+        layout.addWidget(self.device_table, 1)
         
-        tip_label = QLabel("💡 VLAN列表格式: 10:Sales,20:Engineering,30:HR (ID:名称)")
+        tip_label = QLabel("VLAN列表格式: 10:Sales,20:Engineering,30:HR (ID:名称)")
         tip_label.setStyleSheet("color: #5F6B7A; font-size: 11px;")
         layout.addWidget(tip_label)
         
         self.progress_bar = QProgressBar()
         self.progress_bar.setValue(0)
         layout.addWidget(self.progress_bar)
-        
-        preview_group = QWidget()
-        preview_layout = QVBoxLayout(preview_group)
-        preview_layout.setContentsMargins(0, 0, 0, 0)
         
         preview_header = QHBoxLayout()
         preview_label = QLabel("配置预览:")
@@ -214,41 +205,22 @@ class BatchConfigDialog(QDialog):
         self.hostname_label.setStyleSheet("color: #0089FF; font-weight: bold;")
         preview_header.addWidget(self.hostname_label)
         
-        preview_layout.addLayout(preview_header)
+        layout.addLayout(preview_header)
         
         self.preview_text = QTextEdit()
         self.preview_text.setFont(QFont("Consolas", 10))
         self.preview_text.setReadOnly(True)
-        self.preview_text.setMinimumHeight(200)
-        preview_layout.addWidget(self.preview_text)
+        self.preview_text.setMinimumHeight(140)
+        layout.addWidget(self.preview_text, 1)
         
-        layout.addWidget(preview_group)
-        
-        btn_row = QHBoxLayout()
-        
-        import_btn = QPushButton("📥 导入CSV")
-        import_btn.setObjectName("ghostButton")
-        import_btn.clicked.connect(self.import_csv)
-        btn_row.addWidget(import_btn)
-        
-        btn_row.addStretch()
-        
-        generate_btn = QPushButton("🚀 批量生成")
-        generate_btn.setObjectName("primaryButton")
-        generate_btn.clicked.connect(self.generate_configs)
-        btn_row.addWidget(generate_btn)
-        
-        export_btn = QPushButton("💾 导出全部")
-        export_btn.setObjectName("secondaryButton")
-        export_btn.clicked.connect(self.export_all)
-        btn_row.addWidget(export_btn)
-        
-        close_btn = QPushButton("关闭")
-        close_btn.setObjectName("ghostButton")
-        close_btn.clicked.connect(self.close)
-        btn_row.addWidget(close_btn)
-        
-        layout.addLayout(btn_row)
+        # ---------- 全局动作按钮（BaseDialog 统一行） ----------
+        self.import_btn = self.add_button("导入CSV", "secondary", self.import_csv,
+                                          close_on_click=False)
+        self.generate_btn = self.add_button("批量生成", "primary", self.generate_configs,
+                                            close_on_click=False)
+        self.export_btn = self.add_button("导出全部", "secondary", self.export_all,
+                                          close_on_click=False)
+        self.close_btn = self.add_close_button("关闭", "ghost")
         
         for i in range(3):
             self.add_device_row()

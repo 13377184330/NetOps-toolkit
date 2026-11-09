@@ -356,22 +356,62 @@ def install():
     _orig_setStyleSheet = QWidget.setStyleSheet
     QWidget.setStyleSheet = _patched_setStyleSheet
 
-    # QMenu 补丁：popup 窗口默认不透明，QSS 的圆角只剪绘制、剪不掉原生窗口矩形，
-    # 四角与底边残留白色直角块（真机截图反馈）。构造即设 translucent，
-    # menubar.addMenu / 右键 QMenu / QSS 圆角全部一处生效。
-    from PyQt5.QtCore import Qt as _Qt
-    from PyQt5.QtWidgets import QMenu as _QMenu
-    global _orig_menu_init
+    # QMenu 圆角补丁（三版踩坑后的最终方案）：
+    # ① 什么都不做 → QSS 圆角只剪绘制层，原生窗口是矩形，四角残留白色直角块；
+    # ② WA_TranslucentBackground → 普通环境四角 alpha=0 正常，但高 DPI
+    #    （AA_EnableHighDpiScaling，150%/200% 实测）下 popup 的逐像素透明失效，
+    #    alpha=0 的四角被 DWM 渲染成纯黑（真机截图复现 RGB(0,0,0)）；
+    # ③ setMask 圆角遮罩 → 形状在系统层面不含四角像素，残留物理上不可能。
+    #    挂载方式踩坑：monkey-patch QMenu.showEvent/resizeEvent 对 Python 创建的
+    #    菜单生效、对菜单栏（C++ 侧 addMenu）创建的菜单不生效（sip 虚函数分发
+    #    不经过类级补丁）；改用 QApplication 级事件过滤器，C++ 层面拦截所有
+    #    QMenu 的 Show/Resize，与实例创建方式无关，确定性生效。
+    from PyQt5.QtCore import Qt as _Qt, QEvent as _QEvent, QObject as _QObject
+    from PyQt5.QtGui import QPainterPath as _QPainterPath, QRegion as _QRegion
+    from PyQt5.QtCore import QRectF as _QRectF
+    from PyQt5.QtWidgets import QMenu as _QMenu, QApplication as _QApplication
+    global _orig_menu_init, _orig_qapp_init, _menu_radius, _menu_mask_filter
     if _orig_menu_init is None:
         _orig_menu_init = _QMenu.__init__
+        _orig_qapp_init = _QApplication.__init__
 
         def _menu_init(self, *args, **kwargs):
             _orig_menu_init(self, *args, **kwargs)
-            self.setAttribute(_Qt.WA_TranslucentBackground)
+            self.setAttribute(_Qt.WA_NoSystemBackground)   # 防系统擦除画满矩形
+
+        def _menu_apply_mask(menu):
+            # PyQt5 的 QRegion 不接受 QPainterPath 构造（TypeError），
+            # 先展平为多边形再建区域
+            try:
+                path = _QPainterPath()
+                path.addRoundedRect(_QRectF(menu.rect()), _menu_radius, _menu_radius)
+                polys = path.toSubpathPolygons()
+                if polys:
+                    menu.setMask(_QRegion(polys[0].toPolygon()))
+            except Exception:
+                pass
+
+        class _MenuMaskFilter(_QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() in (_QEvent.Show, _QEvent.Resize) and isinstance(obj, _QMenu):
+                    _menu_apply_mask(obj)
+                return False
+
+        def _qapp_init(self, *args, **kwargs):
+            _orig_qapp_init(self, *args, **kwargs)
+            f = getattr(self, "_netops_menu_filter", None)
+            if f is None:
+                f = _MenuMaskFilter(self)
+                self.installEventFilter(f)
+                self._netops_menu_filter = f
         _QMenu.__init__ = _menu_init
+        _QApplication.__init__ = _qapp_init
 
 
 _orig_menu_init = None
+_orig_qapp_init = None
+_menu_mask_filter = None
+_menu_radius = 12          # 与 styles.py QMenu border-radius 保持一致
 
 
 # ---------------- 切换 ----------------
@@ -413,10 +453,20 @@ def set_theme(theme_name, app=None):
 
 
 def _apply_palette(app):
-    """QPalette 层面需要主题感知的颜色（QSS 覆盖不到的，如占位文字）"""
+    """QPalette 层面需要主题感知的颜色（QSS 覆盖不到的）：
+    - PlaceholderText：占位文字
+    - AlternateBase：斑马纹交替行（setAlternatingRowColors(True) 的列表/表格
+      走 palette 而非 QSS——深色主题下不映射会冒出刺眼的白色斑马行，
+      模板管理器深色截图实锤：交替行 #F5F5F5 + 深色前景几乎不可读）
+    - Highlight / HighlightedText：无 QSS 选中规则的控件兜底选中色
+      （原生 #0078d7 在深色下偏闷，统一到主题 accent）
+    """
     from PyQt5.QtGui import QPalette
-    pal = app.palette()
+    pal = QPalette()
     pal.setColor(QPalette.PlaceholderText, QColor(t("placeholder")))
+    pal.setColor(QPalette.AlternateBase, QColor(t("zebra")))
+    pal.setColor(QPalette.Highlight, QColor(t("accent")))
+    pal.setColor(QPalette.HighlightedText, QColor("#FFFFFF"))
     app.setPalette(pal)
 
 
