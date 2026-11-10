@@ -25,6 +25,7 @@ from gui.tabs.security_tab import SecurityConfigTab
 from gui.tabs.interface_tab import InterfaceConfigTab
 from gui.tabs.device_ops_tab import DeviceOpsTab
 from gui.tabs.console_viz_tab import ConsoleVizTab
+from gui.tabs.terminal_tab import TerminalTab
 from gui.tabs.topology_tab import NetworkTopologyPage
 from gui.tabs.adv_config_tab import AdvConfigTab
 from gui.config_gen_page import ConfigGenPage
@@ -269,6 +270,7 @@ class MainWindow(QMainWindow):
             "adv": AdvConfigTab(),
             "device_ops": DeviceOpsTab(),
             "console_viz": ConsoleVizTab(),
+            "terminal": TerminalTab(),
             "topology": NetworkTopologyPage()
         }
         # 配置生成聚合页（配置模块收进二级导航，按使用频率排序：高频在前）
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(_sw(self.tabs["device_ops"]), "设备运维")
         self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
         self.tab_widget.addTab(_sw(self.tabs["console_viz"]), "Console 可视化")
+        self.tab_widget.addTab(self.tabs["terminal"], "自由终端")
         # 页面切换时：配置页带预览区、运维/Console 页独占全宽
         self.tab_widget.currentChanged.connect(self._on_page_changed)
         self._preview_collapsed = False
@@ -479,10 +482,17 @@ class MainWindow(QMainWindow):
             Settings().set("window_geometry", [g.x(), g.y(), g.width(), g.height()])
         except Exception:
             pass
+        # 自由终端页签可能持有串口连接：退出前停线程释放串口
+        try:
+            term = self.tabs.get("terminal")
+            if term is not None:
+                term.shutdown()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     # 全宽独占页集合（无右侧预览、无配置操作按钮）
-    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化", "网络拓扑"}
+    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化", "网络拓扑", "自由终端"}
 
     def _on_page_changed(self, index: int):
         """页面切换：配置页显示预览区+操作行；运维/Console 页独占全宽"""

@@ -25,17 +25,21 @@ FORBIDDEN_KEYWORDS = (
 
 
 def check_read_only(command: str) -> tuple[bool, str]:
-    """校验命令是否只读。返回 (ok, reason)"""
+    """校验命令是否只读。返回 (ok, reason)
+    判断顺序：前缀白名单优先——display/show/screen-length 是设备查询域前缀，
+    天然只读（display interface brief / show saved-configuration 这类高频查询
+    若先做关键字匹配会被「interface / save」误拦）；
+    FORBIDDEN 关键字只兜底拦「不以白名单前缀开头」的命令（vlan/undo/save/sysname…）。"""
     cmd = command.strip()
     low = cmd.lower()
     if not cmd:
         return False, "空命令"
-    for kw in FORBIDDEN_KEYWORDS:
-        if kw.strip().lower() in low:
-            return False, f"命令包含写操作关键字「{kw.strip()}」，已按只读红线拦截"
     for p in READ_ONLY_PREFIXES:
         if low.startswith(p):
             return True, ""
+    for kw in FORBIDDEN_KEYWORDS:
+        if kw.strip().lower() in low:
+            return False, f"命令包含写操作关键字「{kw.strip()}」，已按只读红线拦截"
     return False, f"命令「{cmd}」不在只读白名单内（display/show/quit），已拦截"
 
 
