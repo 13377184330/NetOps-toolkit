@@ -10,9 +10,11 @@ import os
 import json
 from datetime import datetime
 
+from utils.app_paths import app_root
 from utils.credential_crypto import encrypt, decrypt
 
-DEVICES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "devices.json")
+# 开发态：项目根/config（保持现状）；冻结态：exe 同目录/config（可写持久）
+DEVICES_FILE = os.path.join(app_root(), "config", "devices.json")
 
 
 class DeviceStore:

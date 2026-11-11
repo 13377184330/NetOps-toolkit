@@ -6,10 +6,21 @@
 
 import json
 import os
+import sys
 from datetime import datetime
 from typing import List, Dict, Optional
 
-HISTORY_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'history')
+from utils.app_paths import app_root
+
+
+def _default_history_dir():
+    """开发态：工作空间/config/history（保持现状）；冻结态：exe 同目录/config/history"""
+    if getattr(sys, "frozen", False):
+        return os.path.join(app_root(), "config", "history")
+    return os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'history')
+
+
+HISTORY_DIR = _default_history_dir()
 
 
 class ConfigHistory:

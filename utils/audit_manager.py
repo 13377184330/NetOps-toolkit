@@ -12,6 +12,8 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 
+from utils.app_paths import app_root
+
 
 class AuditAction(Enum):
     """审计操作类型"""
@@ -63,7 +65,8 @@ class AuditManager:
     
     def __init__(self, audit_dir: str = None):
         if audit_dir is None:
-            audit_dir = os.path.join(os.path.dirname(__file__), "..", "audit")
+            # 开发态：项目根/audit（保持现状）；冻结态：exe 同目录/audit（可写持久）
+            audit_dir = os.path.join(app_root(), "audit")
         
         self.audit_dir = os.path.abspath(audit_dir)
         os.makedirs(self.audit_dir, exist_ok=True)

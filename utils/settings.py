@@ -6,8 +6,19 @@
 
 import json
 import os
+import sys
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'settings.json')
+from utils.app_paths import app_root
+
+
+def _default_settings_file():
+    """开发态：工作空间/config（保持现状）；冻结态：exe 同目录/config（可写持久）"""
+    if getattr(sys, "frozen", False):
+        return os.path.join(app_root(), "config", "settings.json")
+    return os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'settings.json')
+
+
+SETTINGS_FILE = _default_settings_file()
 
 DEFAULT_SETTINGS = {
     "theme": "light",

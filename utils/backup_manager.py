@@ -14,6 +14,8 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
 import difflib
 
+from utils.app_paths import app_root
+
 
 @dataclass
 class BackupRecord:
@@ -36,7 +38,8 @@ class ConfigBackupManager:
     
     def __init__(self, backup_dir: str = None):
         if backup_dir is None:
-            backup_dir = os.path.join(os.path.dirname(__file__), "..", "backups")
+            # 开发态：项目根/backups（保持现状）；冻结态：exe 同目录/backups（可写持久）
+            backup_dir = os.path.join(app_root(), "backups")
         
         self.backup_dir = os.path.abspath(backup_dir)
         os.makedirs(self.backup_dir, exist_ok=True)

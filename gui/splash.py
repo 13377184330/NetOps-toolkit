@@ -285,11 +285,20 @@ class SplashManager:
             if self.next_step():
                 QTimer.singleShot(30, process_step)
             else:
-                QTimer.singleShot(150, self.finish)
-                QTimer.singleShot(200, callback)
-        
+                # 主窗口构造是同步的（全页签实例化 ~数秒）：先建完窗口再关 splash，
+                # 否则 splash 提前关闭 → 空白窗口期 → 用户以为程序没启动
+                QTimer.singleShot(150, self._build_then_finish(callback))
+
         QTimer.singleShot(60, process_step)
-    
+
+    def _build_then_finish(self, callback):
+        def run():
+            try:
+                callback()      # MainWindow() 构造 + show()
+            finally:
+                self.finish()   # 主窗口已显示（或失败）后再关 splash
+        return run
+
     def finish(self):
         self.splash.dot_timer.stop()
         self.splash.close()

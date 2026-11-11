@@ -10,6 +10,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 import shutil
 
+from utils.app_paths import app_root
+
 
 class Template:
     """模板类"""
@@ -212,7 +214,8 @@ class TemplateManager:
     
     def __init__(self, templates_dir: str = None):
         if templates_dir is None:
-            templates_dir = os.path.join(os.path.dirname(__file__), "..", "templates")
+            # 开发态：项目根/templates（保持现状）；冻结态：exe 同目录/templates（可写，首次自建）
+            templates_dir = os.path.join(app_root(), "templates")
         
         self.templates_dir = os.path.abspath(templates_dir)
         os.makedirs(self.templates_dir, exist_ok=True)

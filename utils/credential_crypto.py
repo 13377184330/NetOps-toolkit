@@ -2,8 +2,12 @@
 import os
 from cryptography.fernet import Fernet
 
-# 密钥与 settings.json 同存于 config/，并加入 .gitignore
-_KEY_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config", "secret.key")
+from utils.app_paths import app_root
+
+# 密钥与 settings.json 同存于数据根 config/，并加入 .gitignore
+# 开发态 = 项目根；冻结态 = exe 同目录（_MEIPASS 是只读临时目录，密钥放那里每次启动都变，
+# 已加密的设备凭据将全部无法解密）
+_KEY_FILE = os.path.join(app_root(), "config", "secret.key")
 
 
 def _load_or_create_key() -> bytes:
