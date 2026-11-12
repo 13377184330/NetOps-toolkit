@@ -227,6 +227,8 @@ class AIOpsTab(QWidget):
         self._pending_deploy = None
         self._external_context = ""  # 外部带入的诊断上下文（拓扑页采集的配置，一次性）
         self._device_ids = []       # combo index -> device_id
+        self._queue_filter = "all"  # 队列风险筛选：all/dangerous/write/readonly
+        self._compact_cards = False # 多于30条自动切紧凑模式
         self.initUI()
 
     # ---------------------------------------------------------------- 布局
@@ -355,6 +357,24 @@ class AIOpsTab(QWidget):
         to_gen_btn.clicked.connect(self._send_to_config_gen)
         q_bar.addWidget(to_gen_btn)
         q_lay.addLayout(q_bar)
+
+        # 风险筛选（真实用户实测：78 卡时找高危/特定命令只能拖滚动条——必须给筛选通道）
+        filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(4)
+        filter_bar.addWidget(QLabel("筛选:"))
+        self.filter_combo = QComboBox()
+        for key, label in (("all", "全部"), ("dangerous", "⚠ 仅高危"),
+                           ("write", "写配置"), ("readonly", "只读")):
+            self.filter_combo.addItem(label, key)
+        self.filter_combo.setStyleSheet("QComboBox { padding: 4px 8px; font-size: 12px; }")
+        self.filter_combo.currentIndexChanged.connect(
+            lambda _i: self._set_queue_filter(self.filter_combo.currentData()))
+        filter_bar.addWidget(self.filter_combo)
+        filter_bar.addStretch()
+        self.shown_label = QLabel("")      # 「显示 x/y」提示（字号与筛选下拉一致，视觉评审：偏小辨识度低）
+        self.shown_label.setStyleSheet(f"color: {TEXT_SUB}; font-size: 12px;")
+        filter_bar.addWidget(self.shown_label)
+        q_lay.addLayout(filter_bar)
 
         # 队列容器：QScrollArea + 纵向直排卡片（高度自适应；不用 QListWidget——
         # setItemWidget 依赖手动 sizeHint，布局未激活时高度偏小实测会裁掉注释行/徽标）
@@ -717,6 +737,11 @@ class AIOpsTab(QWidget):
 
     def _on_stream_ok(self, full, mode, vendor):
         if self._aborted:
+            # 用户停止：已输出的部分作为本回答落历史（保留上下文连续性，不丢不重）
+            if full and full.strip():
+                self._append_history("assistant", full)
+                self._rerender()
+            self._restore_after_stream()
             return
         if not full.strip():
             self._on_stream_failed("模型返回为空（接口异常或本地模型未加载）",
@@ -766,6 +791,8 @@ class AIOpsTab(QWidget):
         self.stop_btn.setVisible(False)
         self._sync_status()
         self._auto_scroll()
+        # 焦点回输入框：连续对话节奏（真实用户实测：每发一句都要重新点输入框打断节奏）
+        self.input_view.setFocus()
 
     _MAX_HISTORY = 50   # 最多保留 25 轮对话（user+assistant 各一条），防长期会话内存膨胀
 
@@ -781,16 +808,33 @@ class AIOpsTab(QWidget):
         return ""
 
     # ---------------------------------------------------------------- 命令队列
+    _COMPACT_THRESHOLD = 30   # 超过此数自动切紧凑卡（信息密度优先，完整卡滚动找不着）
+
     def _queue_cards(self, cards, source="AI"):
         """AI/规则引擎产出的命令进审阅队列（默认全部不勾选——人工确认从零开始）"""
         for c in cards:
             c["source"] = source
             c["checked"] = False
             self._cards.append(c)
+        if len(self._cards) > self._COMPACT_THRESHOLD:
+            self._compact_cards = True
         self._refresh_queue()
 
+    def _set_queue_filter(self, key):
+        self._queue_filter = key if key in ("all", "dangerous", "write", "readonly") else "all"
+        self._refresh_queue()
+
+    def _visible_cards(self):
+        """按风险筛选后的可见卡序（索引对齐 self._cards 的真实下标）"""
+        f = self._queue_filter
+        if f == "all":
+            return list(enumerate(self._cards))
+        return [(i, c) for i, c in enumerate(self._cards) if c["risk"] == f]
+
     def _refresh_queue(self):
-        """重建队列卡片（scroll+直排布局，卡片高度由内容自适应，不裁切）"""
+        """重建队列卡片：高危置顶 → 筛选 → 紧凑模式自适应。
+        真实用户实测（78 卡场景）：卡片被压成细线、高危埋 4300px 深处难发现——
+        一是排序把高危排最前，二是 >30 条自动紧凑（单行命令+徽标），三是筛选器直通"""
         while self.queue_lay.count():
             item = self.queue_lay.takeAt(0)
             w = item.widget()
@@ -798,31 +842,56 @@ class AIOpsTab(QWidget):
                 w.deleteLater()
         n_danger = sum(1 for c in self._cards if c["risk"] == "dangerous")
         n_readonly = sum(1 for c in self._cards if c["risk"] == "readonly")
-        self._queue_group.setTitle(
-            f"待确认命令队列（{len(self._cards)} 条 · 高危 {n_danger} · 只读 {n_readonly}）")
+        # 高危警示：标题红色 + 计数高亮（用户实测反馈“高危很难被发现”）
+        if n_danger:
+            self._queue_group.setTitle(
+                f"待确认命令队列（{len(self._cards)} 条 · ⚠ 高危 {n_danger} · 只读 {n_readonly}）")
+            self._queue_group.setStyleSheet(self._queue_group.styleSheet().replace(
+                f"color: {TEXT}; font-size: 14px;", f"color: {DANGER}; font-size: 14px;"))
+        else:
+            self._queue_group.setTitle(
+                f"待确认命令队列（{len(self._cards)} 条 · 高危 0 · 只读 {n_readonly}）")
+            self._queue_group.setStyleSheet(self._queue_group.styleSheet().replace(
+                f"color: {DANGER}; font-size: 14px;", f"color: {TEXT}; font-size: 14px;"))
         if not self._cards:
             empty = QLabel("队列空：AI 生成的命令会出现在这里，逐条核验勾选后才可下发")
             empty.setStyleSheet(f"color: {TEXT_SUB}; font-size: 12px;")
             empty.setAlignment(Qt.AlignCenter)
             self.queue_lay.addWidget(empty)
-        for idx, c in enumerate(self._cards):
+        # 排序：高危置顶（原相对顺序保持稳定）
+        order = {"dangerous": 0, "write": 1, "readonly": 2}
+        self._cards.sort(key=lambda c: order.get(c.get("risk"), 1))
+        visible = self._visible_cards()
+        self.shown_label.setText(f"显示 {len(visible)}/{len(self._cards)}")
+        for idx, c in visible:
             self.queue_lay.addWidget(self._make_card_row(c, idx))
         self.queue_lay.addStretch()
+        # 布局压缩根治（真实用户实测：78 卡全被压成 1-2px 细线）：
+        # QScrollArea 布局推理把超出视口的卡片行当可压缩项——统计本批可见卡行的
+        # sizeHint 总和 + 间距，直接钉给宿主 widget 的 minimumHeight，
+        # widgetResizable 下布局必须给足空间，超出视口部分自然走滚动
+        rows = [self.queue_lay.itemAt(i).widget() for i in range(self.queue_lay.count())
+                if self.queue_lay.itemAt(i).widget() is not None]
+        need_h = sum(r.sizeHint().height() for r in rows) \
+            + self.queue_lay.spacing() * max(0, len(rows) - 1) \
+            + self.queue_lay.contentsMargins().top() + self.queue_lay.contentsMargins().bottom()
+        self.queue_host.setMinimumHeight(need_h)
         self._sync_deploy_btn()
 
     def _make_card_row(self, card, idx):
         row = QWidget()
-        row.setStyleSheet(f"""
-            QWidget#cardRow {{ background: {CARD}; border: 1px solid {BORDER};
-                border-radius: 12px; }}
-        """)
+        is_danger = card["risk"] == "dangerous"
+        # 高危红边加粗（扫读一眼锁定）；紧凑模式降行距提升信息密度
+        border_css = (f"border: 2px solid {DANGER}; background: #FFF7F7;"
+                      if is_danger else f"border: 1px solid {BORDER}; background: {CARD};")
+        row.setStyleSheet(f"QWidget#cardRow {{ {border_css} border-radius: 10px; }}")
         row.setObjectName("cardRow")
         v = QVBoxLayout(row)
-        v.setContentsMargins(12, 8, 12, 8)
-        v.setSpacing(3)
+        v.setContentsMargins(10, 5, 10, 5)
+        v.setSpacing(self.queue_lay.spacing() if not self._compact_cards else 1)
 
         top = QHBoxLayout()
-        top.setSpacing(8)
+        top.setSpacing(6)
         chk = QCheckBox()
         chk.setMinimumHeight(20)                     # 防布局压缩把指示器挤扁
         chk.setChecked(bool(card["checked"]))
@@ -878,22 +947,36 @@ class AIOpsTab(QWidget):
             top.addWidget(del_btn)
         v.addLayout(top)
 
+        # 紧凑模式：注释/体检收敛进 tooltip（78 卡场景单行密度优先，悬停看详情）；
+        # 常规模式保留完整行（<30 卡时可读性优先）
+        extras_tip = []
         if card.get("note"):
-            note = QLabel("# " + card["note"])
-            note.setMinimumHeight(16)
-            note.setStyleSheet(f"color: {TEXT_SUB}; font-size: 11px; background: transparent;")
-            note.setContentsMargins(30, 0, 0, 0)
-            v.addWidget(note)
+            extras_tip.append("# " + card["note"])
         for it in card.get("lint", [])[:2]:
-            warn_l = QLabel(f"ⓘ [{it.get('level', '警告')}] {it.get('issue', '')} → {it.get('advice', '')}")
-            warn_l.setMinimumHeight(16)
-            warn_l.setStyleSheet("color: #FA9D3B; font-size: 11px; background: transparent;")
-            warn_l.setContentsMargins(30, 0, 0, 0)
-            v.addWidget(warn_l)
+            extras_tip.append(f"ⓘ [{it.get('level', '警告')}] {it.get('issue', '')} → {it.get('advice', '')}")
+        if extras_tip:
+            if self._compact_cards:
+                row.setToolTip("\n".join(extras_tip))
+                row.setMinimumHeight(28)   # 紧凑单行（视觉评审：单屏 5 条偏少，再压实一档）
+            else:
+                if card.get("note"):
+                    note = QLabel("# " + card["note"])
+                    note.setMinimumHeight(16)
+                    note.setStyleSheet(f"color: {TEXT_SUB}; font-size: 11px; background: transparent;")
+                    note.setContentsMargins(28, 0, 0, 0)
+                    v.addWidget(note)
+                for line in extras_tip:
+                    if line.startswith("ⓘ"):
+                        warn_l = QLabel(line)
+                        warn_l.setMinimumHeight(16)
+                        warn_l.setStyleSheet("color: #FA9D3B; font-size: 11px; background: transparent;")
+                        warn_l.setContentsMargins(28, 0, 0, 0)
+                        v.addWidget(warn_l)
         # 卡高钉死到内容 sizeHint：防止滚动区空间不足时布局把整卡压扁
         # （布局只会压缩到 minimumSize，把 minimum 提到 sizeHint 即不可压）
         row.adjustSize()
-        row.setMinimumHeight(max(row.sizeHint().height(), 40))
+        min_h = 30 if self._compact_cards else 40
+        row.setMinimumHeight(max(row.sizeHint().height(), min_h))
         return row
 
     def _on_card_checked(self, idx, on):
