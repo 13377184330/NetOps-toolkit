@@ -478,9 +478,13 @@ class ConsoleVizTab(QWidget):
         """Console 采集的 LLDP 邻居 → 自动填充「网络拓扑」页"""
         try:
             main = self.window()
-            topo = getattr(main, "tabs", {}).get("topology") if hasattr(main, "tabs") else None
+            # 拓扑页懒加载：优先取已实例化的 topology_page；未实例化则用 _make_topology 幂等创建
+            topo = getattr(main, "topology_page", None)
             if topo is None:
-                return
+                maker = getattr(main, "_make_topology", None)
+                if maker is None:
+                    return
+                topo = maker()
             lldp_text = result.get("lldp") or ""
             neighbors = cv.parse_lldp(lldp_text)
             # 终端发现：MAC 表（谁接在哪个口）+ ARP 表（补 IP）

@@ -458,10 +458,12 @@ class MainWindow(QMainWindow):
         theme.on_change(self.update)
 
     def _make_topology(self):
-        """惰性构造拓扑页（首次切到「网络拓扑」时由 addLazyTab 调用）。
-        拓扑页构造含本机网卡扫描（getmac 子进程），耗时约 2s，放启动期会拖慢首屏。"""
+        """惰性构造拓扑页（首次切到「网络拓扑」或 Console 采集完成时调用）。
+        拓扑页构造含本机网卡扫描（getmac 子进程），耗时约 2s，放启动期会拖慢首屏。
+        幂等：多处（侧边栏懒加载 / Console 采集联动）可能先后调用，只创建一次。"""
         from gui.tabs.topology_tab import NetworkTopologyPage
-        self.topology_page = NetworkTopologyPage()
+        if getattr(self, "topology_page", None) is None:
+            self.topology_page = NetworkTopologyPage()
         return self.topology_page
 
     def _restore_geometry(self):
