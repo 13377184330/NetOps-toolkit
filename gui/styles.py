@@ -192,6 +192,7 @@ QComboBox::down-arrow {{
 
 QComboBox QAbstractItemView {{
     background: {CARD};
+    color: {TEXT};
     border: 1px solid {BORDER};
     border-radius: 10px;
     padding: 6px;

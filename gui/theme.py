@@ -399,6 +399,31 @@ def install():
                     _menu_apply_mask(obj)
                 return False
 
+        # QComboBox 弹出列表（QListView popup）palette 修正：
+        # 主窗口 WA_TranslucentBackground 下，popup view 的 palette Window 被
+        # 强制成黑（离屏实测 #000000），真机渲染路径 QSS 遮不住 → 整列黑底黑字
+        # （拓扑页「添加设备-类型」下拉实锤）。显示前显式把 palette 染回主题色，
+        # 渲染时无论走 QSS 还是 palette 路径都正确。
+        class _ComboPopupPaletteFilter(_QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() != _QEvent.Show:
+                    return False
+                try:
+                    from PyQt5.QtWidgets import QListView
+                    if not isinstance(obj, QListView):
+                        return False
+                    from PyQt5.QtGui import QPalette as _QPal, QColor as _QColor
+                    pal = obj.palette()
+                    pal.setColor(_QPal.Window, _QColor(t("card")))
+                    pal.setColor(_QPal.Base, _QColor(t("card")))
+                    pal.setColor(_QPal.Text, _QColor(t("text")))
+                    pal.setColor(_QPal.Highlight, _QColor(t("accent")))
+                    pal.setColor(_QPal.HighlightedText, _QColor("#FFFFFF"))
+                    obj.setPalette(pal)
+                except Exception:
+                    pass
+                return False
+
         def _qapp_init(self, *args, **kwargs):
             _orig_qapp_init(self, *args, **kwargs)
             f = getattr(self, "_netops_menu_filter", None)
@@ -406,6 +431,11 @@ def install():
                 f = _MenuMaskFilter(self)
                 self.installEventFilter(f)
                 self._netops_menu_filter = f
+            g = getattr(self, "_netops_combo_palette_filter", None)
+            if g is None:
+                g = _ComboPopupPaletteFilter(self)
+                self.installEventFilter(g)
+                self._netops_combo_palette_filter = g
         _QMenu.__init__ = _menu_init
         _QApplication.__init__ = _qapp_init
 
@@ -462,9 +492,12 @@ def _apply_palette(app):
       模板管理器深色截图实锤：交替行 #F5F5F5 + 深色前景几乎不可读）
     - Highlight / HighlightedText：无 QSS 选中规则的控件兜底选中色
       （原生 #0078d7 在深色下偏闷，统一到主题 accent）
+    注意：必须基于 app.palette() 增量覆盖——QPalette() 默认构造所有角色都是
+    纯黑，直接 setPalette 会让走 palette 渲染的控件黑底黑字（实锤：拓扑页
+    添加设备的类型下拉 QListView 弹窗，Windows 真机下整列全黑看不清）。
     """
     from PyQt5.QtGui import QPalette
-    pal = QPalette()
+    pal = QPalette(app.palette())
     pal.setColor(QPalette.PlaceholderText, QColor(t("placeholder")))
     pal.setColor(QPalette.AlternateBase, QColor(t("zebra")))
     pal.setColor(QPalette.Highlight, QColor(t("accent")))
