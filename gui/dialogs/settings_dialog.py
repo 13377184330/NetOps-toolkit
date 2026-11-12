@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QGroupBox, QComboBox, QSpinBox,
                              QCheckBox, QTabWidget, QWidget, QLineEdit,
                              QListWidget, QApplication, QSizePolicy)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
 import os
 import sys
@@ -16,8 +16,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from gui.styles import (MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE,
                         BORDER, CARD, TEXT)
-from gui.dialogs.base import BaseDialog, info_box, question_box
+from gui.dialogs.base import BaseDialog, info_box, question_box, error_box
 from utils.settings import Settings
+from modules import ai_ops
+from utils.credential_crypto import encrypt
 
 # 分组框紧凑化（仅本对话框）：全局 QGroupBox 的 36px 标题留白是为工作区
 # 大卡片调的；设置页三连组在 1280×800@200% 逻辑屏上会被 Qt 的「窗口自动
@@ -47,6 +49,19 @@ QGroupBox::title {{
 # 输入控件最小高度：布局空间不足时绝不压碎（高 DPI 小屏实测下拉框可被压到 8px）
 _FIELD_MIN_H = 40
 _SPIN_MIN_H = 34
+
+
+class _AIConnTestWorker(QThread):
+    """连通测试放子线程（同步测试会冻结 UI，全局铁律禁止）"""
+    done = pyqtSignal(bool, str)
+
+    def __init__(self, cfg, parent=None):
+        super().__init__(parent)
+        self._cfg = cfg
+
+    def run(self):
+        ok, msg = ai_ops.test_connection(self._cfg)
+        self.done.emit(ok, msg)
 
 
 class SettingsDialog(BaseDialog):
@@ -88,6 +103,7 @@ class SettingsDialog(BaseDialog):
         layout.setSpacing(15)
 
         tabs = QTabWidget()
+        self.tabs_widget = tabs  # 供 go_ai_tab() 跳页
 
         # ---------------- 常规页 ----------------
         general_widget = QWidget()
@@ -219,12 +235,152 @@ class SettingsDialog(BaseDialog):
 
         tabs.addTab(history_widget, "历史")
 
+        # ---------------- AI 页 ----------------
+        ai_widget = QWidget()
+        ai_layout = QVBoxLayout(ai_widget)
+        ai_layout.setSpacing(12)
+
+        llm_group, llm_layout = self._make_group("大模型服务（自然语言运维）")
+
+        # 服务商：预设自动带出地址与模型名，均可手改
+        self._ai_provider_keys = list(ai_ops.PROVIDERS.keys())
+        cur_ai = self.settings.get("ai", {}) or {}
+        cur_pid = cur_ai.get("provider", "deepseek")
+        pid_index = (self._ai_provider_keys.index(cur_pid)
+                     if cur_pid in self._ai_provider_keys else 0)
+        self.ai_provider_combo = self._combo(
+            [ai_ops.PROVIDERS[k][0] for k in self._ai_provider_keys], pid_index)
+        self.ai_provider_combo.currentIndexChanged.connect(self._fill_ai_defaults)
+        llm_layout.addWidget(self._labeled_row("服务商:", self.ai_provider_combo))
+
+        self.ai_base_edit = QLineEdit(cur_ai.get("base_url", ""))
+        self.ai_base_edit.setPlaceholderText("OpenAI 兼容地址，如 https://api.deepseek.com/v1")
+        self.ai_base_edit.setMinimumHeight(_FIELD_MIN_H)
+        self._base_saved = self.ai_base_edit.text()
+        llm_layout.addWidget(self._labeled_row("API 地址:", self.ai_base_edit))
+
+        self.ai_model_edit = QLineEdit(cur_ai.get("model", ""))
+        self.ai_model_edit.setPlaceholderText("模型名，如 deepseek-chat / glm-4-flash")
+        self.ai_model_edit.setMinimumHeight(_FIELD_MIN_H)
+        self._model_saved = self.ai_model_edit.text()
+        llm_layout.addWidget(self._labeled_row("模型名称:", self.ai_model_edit))
+
+        self.ai_key_edit = QLineEdit("")
+        self.ai_key_edit.setEchoMode(QLineEdit.Password)
+        has_key = bool(cur_ai.get("api_key_enc"))
+        self.ai_key_edit.setPlaceholderText("已加密保存（留空 = 保持不变）" if has_key
+                                            else "sk-…（仅存本机，Fernet 加密）")
+        self.ai_key_edit.setMinimumHeight(_FIELD_MIN_H)
+        llm_layout.addWidget(self._labeled_row("API Key:", self.ai_key_edit))
+
+        test_row = QHBoxLayout()
+        self.ai_test_btn = QPushButton("测试连接")
+        self.ai_test_btn.setObjectName("secondaryButton")
+        self.ai_test_btn.clicked.connect(self.test_ai_connection)
+        test_row.addWidget(self.ai_test_btn)
+        self.ai_test_label = QLabel("")
+        self.ai_test_label.setStyleSheet("color: #5F6B7A; font-size: 12px;")
+        self.ai_test_label.setWordWrap(True)
+        test_row.addWidget(self.ai_test_label, 1)
+        llm_layout.addLayout(test_row)
+
+        # 未手填时带预设默认值（provider 预设优先，用户改过的以用户为准）
+        if not self.ai_base_edit.text().strip():
+            self._fill_ai_defaults()
+
+        ai_layout.addWidget(llm_group)
+
+        # 安全说明：与设备凭据同一套本机加密体系
+        sec_group, sec_layout = self._make_group("安全说明")
+        sec_text = QLabel(
+            "• API Key 用本机密钥加密存储，不进 Git、不随配置导出。\n"
+            "• 工具只直连你填写的 API 地址；本地 Ollama/vLLM 可完全离线。\n"
+            "• AI 只生成命令草稿：所有命令必须经你逐条勾选 + 二次确认才会下发到设备，"
+            "且默认不存盘。")
+        sec_text.setWordWrap(True)
+        sec_text.setStyleSheet("color: #5F6B7A; font-size: 12px;")
+        sec_layout.addWidget(sec_text)
+        ai_layout.addWidget(sec_group)
+        ai_layout.addStretch()
+
+        tabs.addTab(ai_widget, "AI")
+
         layout.addWidget(tabs)
 
         # 按钮行（BaseDialog 统一行：主操作自然落在最右）
         self.add_button("恢复默认", "ghost", self.reset_settings, close_on_click=False)
         self.add_close_button("取消", "ghost")
         self.add_button("保存", "primary", self.save_settings, close_on_click=False)
+
+    def _labeled_row(self, label_text, field):
+        row = QHBoxLayout()
+        lab = QLabel(label_text)
+        lab.setStyleSheet("font-weight: bold;")
+        lab.setFixedWidth(76)
+        row.addWidget(lab)
+        row.addWidget(field, 1)
+        wrap = QWidget()
+        wrap.setLayout(row)
+        return wrap
+
+    def _fill_ai_defaults(self):
+        """切换服务商：地址/模型带出预设默认（用户可再手改）"""
+        idx = self.ai_provider_combo.currentIndex()
+        if 0 <= idx < len(self._ai_provider_keys):
+            _, def_url, def_model = ai_ops.PROVIDERS[self._ai_provider_keys[idx]]
+            self.ai_base_edit.setText(def_url)
+            self.ai_model_edit.setText(def_model)
+
+    def go_ai_tab(self):
+        """供 AI 运维页「⚙ AI 设置」直接跳到本页"""
+        for i in range(self.tabs_widget.count()):
+            if self.tabs_widget.tabText(i) == "AI":
+                self.tabs_widget.setCurrentIndex(i)
+                return
+
+    def test_ai_connection(self):
+        """用表单当前值直测（无需先保存）；子线程执行不冻结 UI"""
+        cfg = {
+            "base_url": self.ai_base_edit.text().strip(),
+            "model": self.ai_model_edit.text().strip(),
+            "api_key": self.ai_key_edit.text().strip(),
+            "configured": True,
+        }
+        # Key 留空 = 用已存 Key 测试
+        if not cfg["api_key"]:
+            saved = self.settings.get("ai", {}) or {}
+            from utils.credential_crypto import decrypt
+            cfg["api_key"] = decrypt(saved.get("api_key_enc", ""))
+        if not cfg["base_url"] or not cfg["model"]:
+            error_box(self, "无法测试", "请先填写 API 地址与模型名称")
+            return
+        self.ai_test_btn.setEnabled(False)
+        self.ai_test_label.setText("测试中…")
+        self._ai_test_worker = _AIConnTestWorker(cfg)
+        self._ai_test_worker.done.connect(self._on_ai_test_done)
+        self._ai_test_worker.start()
+
+    def _on_ai_test_done(self, ok, msg):
+        self.ai_test_btn.setEnabled(True)
+        self.ai_test_label.setText(msg)
+        self.ai_test_label.setStyleSheet(
+            f"color: {'#34C759' if ok else '#FA5151'}; font-size: 12px;")
+
+    def _save_ai_config(self):
+        idx = self.ai_provider_combo.currentIndex()
+        pid = (self._ai_provider_keys[idx]
+               if 0 <= idx < len(self._ai_provider_keys) else "custom")
+        old = self.settings.get("ai", {}) or {}
+        api_key = self.ai_key_edit.text().strip()
+        enc = old.get("api_key_enc", "")
+        if api_key:
+            enc = encrypt(api_key)   # 空 = 保持原 Key
+        self.settings.set("ai", {
+            "provider": pid,
+            "base_url": self.ai_base_edit.text().strip(),
+            "model": self.ai_model_edit.text().strip(),
+            "api_key_enc": enc,
+        })
 
     def save_settings(self):
         theme_map = {0: 'light', 1: 'dark', 2: 'system'}
@@ -243,6 +399,7 @@ class SettingsDialog(BaseDialog):
         self.settings.set('default_ping_count', self.ping_count_spin.value())
         self.settings.set('default_timeout', self.timeout_spin.value())
         self.settings.set('default_port_timeout', self.port_timeout_spin.value())
+        self._save_ai_config()
 
         info_box(self, "成功", "设置已保存，部分设置需要重启生效")
         self.accept()

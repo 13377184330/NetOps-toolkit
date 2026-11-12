@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-NetOps Toolkit - 打包脚本（v4.0 分发版：onedir）
+NetOps Toolkit - 打包脚本（v4.1 分发版：onedir）
 - 纯英文构建区（%LOCALAPPDATA%\\NetOpsBuild），避开中文路径的 PyInstaller 坑
 - onedir：启动快、少杀软误报；整个文件夹分发给同事，双击 NetOps-Toolkit.exe
 - 排除开发数据（config/secret.key/devices.json/settings、audit、backups、templates 自定义模板），

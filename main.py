@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-NetOps Toolkit v4.0
+NetOps Toolkit v4.1
 网络运维工具集 - 交换机配置生成 + 11个网络工具
 """
 
@@ -29,7 +29,7 @@ from gui.tools_window import NetworkToolsWindow
 from gui.splash import SplashManager
 
 APP_NAME = "NetOps Toolkit"
-APP_VERSION = "4.0"
+APP_VERSION = "4.1"
 
 
 def _startup_theme(app):

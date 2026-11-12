@@ -28,6 +28,7 @@ from gui.tabs.console_viz_tab import ConsoleVizTab
 from gui.tabs.terminal_tab import TerminalTab
 from gui.tabs.topology_tab import NetworkTopologyPage
 from gui.tabs.adv_config_tab import AdvConfigTab
+from gui.tabs.ai_ops_tab import AIOpsTab
 from gui.config_gen_page import ConfigGenPage
 from modules import cmd_notes
 from utils.templates import get_template_names, get_template_config
@@ -214,7 +215,7 @@ class MainWindow(QMainWindow):
         self.initUI()
     
     def initUI(self):
-        self.setWindowTitle("NetOps Toolkit v4.0 - 网络运维工具集")
+        self.setWindowTitle("NetOps Toolkit v4.1 - 网络运维工具集")
         self.setMinimumSize(1024, 640)
         # 窗口尺寸：默认 1200x740（约7成屏）；用户拖动调整过的尺寸会被记住（key: window_geometry）
         # 比例法在不同 DPI 感知模式下结果漂移，故用绝对默认值 + 记忆用户尺寸代替
@@ -271,7 +272,8 @@ class MainWindow(QMainWindow):
             "device_ops": DeviceOpsTab(),
             "console_viz": ConsoleVizTab(),
             "terminal": TerminalTab(),
-            "topology": NetworkTopologyPage()
+            "topology": NetworkTopologyPage(),
+            "ai_ops": AIOpsTab()
         }
         # 配置生成聚合页（配置模块收进二级导航，按使用频率排序：高频在前）
         self.config_gen_page = ConfigGenPage({
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
         # 运维/可视化页内容较高：包滚动区（保证各卡片最小高，不被压扁）
         from gui.widget_utils import scroll_wrap as _sw
         self.tab_widget.addTab(_sw(self.tabs["device_ops"]), "设备运维")
+        self.tab_widget.addTab(_sw(self.tabs["ai_ops"]), "AI 运维")
         self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
         self.tab_widget.addTab(_sw(self.tabs["console_viz"]), "Console 可视化")
         self.tab_widget.addTab(self.tabs["terminal"], "自由终端")
@@ -492,7 +495,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     # 全宽独占页集合（无右侧预览、无配置操作按钮）
-    _FULL_WIDTH_PAGES = {"设备运维", "Console 可视化", "网络拓扑", "自由终端"}
+    _FULL_WIDTH_PAGES = {"设备运维", "AI 运维", "Console 可视化", "网络拓扑", "自由终端"}
 
     def _on_page_changed(self, index: int):
         """页面切换：配置页显示预览区+操作行；运维/Console 页独占全宽"""
@@ -790,7 +793,7 @@ class MainWindow(QMainWindow):
         
         title, name, _ = device_names[self.current_device_type]
         # 品牌切换不再更新大标题（标题栏常驻"NetOps Toolkit"，品牌以下拉自示）
-        self.setWindowTitle(f"NetOps Toolkit v4.0 - {name}配置")
+        self.setWindowTitle(f"NetOps Toolkit v4.1 - {name}配置")
         
         for tab in self.tabs.values():
             tab.clear_config()

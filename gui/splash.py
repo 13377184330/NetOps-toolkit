@@ -224,7 +224,7 @@ class ModernSplashScreen(QWidget):
         painter.setFont(QFont("Microsoft YaHei UI", 9))
         painter.setPen(QColor(148, 163, 184))
         
-        version_text = "Version 4.0"
+        version_text = "Version 4.1"
         painter.drawText(30, self.height() - 15, version_text)
         
         copyright_text = "by Dimples"

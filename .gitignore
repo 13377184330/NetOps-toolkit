@@ -37,3 +37,6 @@ _open_tools_new.py
 
 # 平台记忆目录（TeleAgent 工作区产物）
 .workbuddy/
+
+# 临时测试脚本与截图
+.temp/
