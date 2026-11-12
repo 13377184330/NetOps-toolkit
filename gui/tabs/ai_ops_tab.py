@@ -1220,8 +1220,26 @@ class AIOpsTab(QWidget):
 # fence 正则与命令注释切分复用 ai_ops.CMD_FENCE_RE / split_cmd_note（口径唯一）
 
 
+def _line_indent_level(cmd: str) -> int:
+    """命令的视图层级：进入视图命令后缩进 +1，quit/exit/return 降回。
+    返回 (level, is_exit)；层级只影响渲染缩进，不影响命令本身。"""
+    import re as _re
+    view_in = _re.compile(
+        r"^(?:system-view|configure terminal|conf t|"
+        r"interface\s+\S+|vlan\s+\d+|port-group\s+\S+|line\s+\S+|"
+        r"local-user\s+\S+|aaa$|radius\s+\S+|domain\s+\S+)", _re.I)
+    exit_re = _re.compile(r"^(?:quit|exit|return|end)$", _re.I)
+    if exit_re.match(cmd.strip()):
+        return -1
+    return 1 if view_in.match(cmd.strip()) else 0
+
+
 def _render_ai_content(text: str) -> str:
-    """AI 回复 → 气泡内 HTML：fenced 命令块渲染为深色代码卡（高危行标红）
+    """AI 回复 → 气泡内 HTML：fenced 命令块渲染为深色代码卡。
+    读配置三要素（真机用户实测反馈）：
+    - 命令/注释强弱分层（注释降一档亮度 + #，命令亮色，易扫读）
+    - 视图层级缩进（system-view/interface/vlan 进视图后缩进，quit/return 降回）
+    - 危险命令整行红（同队列徽标语义）
     色值 theme.t() 现取——QTextBrowser 的 HTML 不走 QSS 重映射，双主题必须现取"""
     out, last = [], 0
     for m in ai_ops.CMD_FENCE_RE.finditer(text or ""):
@@ -1229,19 +1247,29 @@ def _render_ai_content(text: str) -> str:
         if seg.strip():
             out.append(_html.escape(seg).replace("\n", "<br>"))
         lines_html = []
+        depth = 0
         for raw in m.group(1).splitlines():
             if not raw.strip():
                 continue
             cmd, note = ai_ops.split_cmd_note(raw.strip())
+            delta = _line_indent_level(cmd)
+            if delta < 0:
+                depth = max(0, depth - 1)
+                indent = "　" * depth
+            else:
+                indent = "　" * depth
+                depth = max(0, depth + delta)
             risk = ai_ops.classify_command(cmd)
             color = theme.t("danger") if risk == "dangerous" else theme.t("preview_text")
-            note_html = (f'<span style="color:{theme.t("preview_ph")}">  # {_html.escape(note)}</span>'
-                         if note else "")
-            lines_html.append(f'<div style="color:{color};">{_html.escape(cmd)}{note_html}</div>')
+            note_html = (f'<span style="color:{theme.t("preview_ph")};opacity:0.85;">'
+                         f'&nbsp;#&nbsp;{_html.escape(note)}</span>' if note else "")
+            lines_html.append(
+                f'<div style="color:{color};white-space:nowrap;">'
+                f'{indent}{_html.escape(cmd)}{note_html}</div>')
         out.append(
             f'<div style="background:{theme.t("preview_bg")};border:1px solid '
             f'{theme.t("preview_border")};border-radius:10px;padding:10px 12px;'
-            'margin:6px 0;font-family:Consolas, monospace;font-size:12px;'
+            'margin:6px 0;font-family:Consolas,monospace;font-size:12px;'
             f'line-height:1.6;">{"".join(lines_html)}</div>')
         last = m.end()
     tail = text[last:] if text else ""
