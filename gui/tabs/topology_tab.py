@@ -1208,8 +1208,17 @@ class NetworkTopologyPage(QWidget):
         fit_btn = make_button("适应窗口", "ghost")
         fit_btn.clicked.connect(lambda: self.view.fit_content())
 
+        # 实时刷新开关（学 eNSP：端口灯定时跳动，不用反复手动采集）
+        self.live_btn = make_button("实时: 关", "secondary",
+                                    tip="每 30 秒自动重采一次端口链路状态（只读），端口灯实时跳动。\n"
+                                        "需 Console 口空闲；采集/下发布会自动跳过冲突轮次")
+        self.live_btn.setCheckable(True)
+        self.live_btn.clicked.connect(self._toggle_live)
+        self._live_timer = None     # QTimer（轮询调度）
+        self._live_busy = False     # 本轮轮询中（防重入 + 串口冲突检测）
+
         for w in (collect_btn, panel_btn, help_btn, add_btn, ports_btn,
-                  layout_btn, fit_btn):
+                  layout_btn, fit_btn, self.live_btn):
             bar.addWidget(w)
         layout.addLayout(bar)
 
@@ -1436,6 +1445,89 @@ class NetworkTopologyPage(QWidget):
                 break
         console.start_read()
         self.status_label.setText("正在采集…（进度见 Console 可视化页）")
+
+    # ---------------- 端口状态实时刷新（学 eNSP：端口灯定时跳动） ----------------
+    _LIVE_INTERVAL_MS = 30 * 1000    # 30s 一轮
+
+    def _toggle_live(self, on):
+        from gui.styles import ACCENT, BORDER
+        if on:
+            if not (self._data.get("port") or "").strip():
+                # 没有过 Console 采集记录：无法确定串口，友好提示并弹回开关
+                self.live_btn.setChecked(False)
+                info_box(self, "提示", "还没有采集记录（不知道 Console 口是哪个）。\n"
+                         "请先点「🔌 一键采集」完成一次采集，再开启实时刷新。")
+                return
+            from PyQt5.QtCore import QTimer
+            self.live_timer = QTimer(self)
+            self.live_timer.timeout.connect(self._live_tick)
+            self.live_timer.start(2000)   # 开启后 2s 先来一轮（快速反馈）
+            self.live_btn.setText("实时: 开")
+            self._sys_live_note("实时刷新已开启（30s 一轮，只读；采集/下发期间自动让路）")
+        else:
+            if self.live_timer is not None:
+                self.live_timer.stop()
+                self.live_timer = None
+            self.live_btn.setText("实时: 关")
+            self._sys_live_note("实时刷新已关闭")
+
+    def _sys_live_note(self, text):
+        """实时刷新状态打到拓扑底部提示行（不打断主状态）"""
+        self.hint_label.setText(f"⏱ {text}")
+
+    def _live_tick(self):
+        """一轮轮询：短会话只读重采链路状态 → 更新 _data['link_up'] → 重画端口灯。
+        串口被占用（用户正在采集/下发/别的程序占用）时本轮静默跳过。"""
+        if self._live_busy:
+            return
+        port = (self._data.get("port") or "").strip()
+        vendor = self._data.get("vendor") or ""
+        if not port:
+            return
+        # 厂商名→键（ConsoleReader 用 h3c/huawei 等键）
+        cn2key = {"华为": "huawei", "H3C": "h3c", "锐捷": "ruijie", "迈普": "maipu", "思科": "cisco"}
+        vkey = cn2key.get(vendor) or vendor or "h3c"
+        self._live_busy = True
+
+        class _LiveWorker(QThread):
+            done = pyqtSignal(bool, dict)
+
+            def run(self):
+                from modules import console_reader as cr
+                try:
+                    with cr.ConsoleReader(port, 9600) as rd:
+                        rd.vendor = vkey
+                        link = rd.read_link_state()
+                        self.done.emit(True, link)
+                except Exception:
+                    self.done.emit(False, {})
+
+        def _on_live(ok, link):
+            self._live_busy = False
+            if not ok or not link:
+                return   # 串口忙/解析为空：本轮跳过，下轮再试
+            old = self._data.get("link_up") or {}
+            changed = {k: v for k, v in link.items() if old.get(k) != v}
+            self._data["link_up"] = link
+            if changed:
+                # 只重画端口面板（保留节点位置）；重画走 load 的局部刷新太重，
+                # 直接更新交换机节点的端口状态灯
+                sw = self._sw_node
+                if sw is not None and getattr(sw, "_ports", None):
+                    for p in sw._ports:
+                        name = p["name"]
+                        if name in link or name in old:
+                            p["state"] = _port_state({"name": name}, link)
+                    sw._compute_panel()
+                    sw.update()
+                ups = sum(1 for v in link.values() if v)
+                self._sys_live_note(f"端口状态已刷新：UP {ups} 口"
+                                    + (f"，变化 {len(changed)} 口" if changed else ""))
+                self._refresh_legend()
+
+        self._live_worker = _LiveWorker()
+        self._live_worker.done.connect(_on_live)
+        self._live_worker.start()
 
     # ---------------- 数据填充 ----------------
     def load_topology(self, local_name="", local_meta=None, neighbors=None,
@@ -1668,6 +1760,7 @@ class NetworkTopologyPage(QWidget):
         if kind in ("switch", "placeholder"):
             buttons = [
                 ("端口面板（可视化配置）", self.show_device_panel, "primaryButton"),
+                ("进入终端 CLI", self._goto_terminal, "secondaryButton"),
                 ("端口配置（Access/Trunk）", self.show_port_config, "secondaryButton"),
                 ("AI 诊断此设备", self._goto_ai_diagnosis, "secondaryButton"),
                 ("查看完整配置", lambda: self._goto("Console 可视化"), "secondaryButton"),
@@ -1753,6 +1846,22 @@ class NetworkTopologyPage(QWidget):
             if tw.tabText(i) == title:
                 tw.setCurrentIndex(i)
                 return
+
+    def _goto_terminal(self):
+        """联动（学 eNSP 双击设备进 CLI）：带 Console 口跳自由终端并预填，
+        连接动作留给用户点（操作可见）；无串口记录时提示先采集"""
+        port = (self._data.get("port") or "").strip()
+        if not port:
+            info_box(self, "提示", "还没有 Console 采集记录（不知道串口）。\n"
+                     "请先点「🔌 一键采集」完成一次采集。")
+            return
+        main = self.window()
+        term = getattr(main, "tabs", {}).get("terminal")
+        if term is None:
+            return
+        if term.prefill_console(port, 9600,
+                                note=f"[拓扑] 来自 {self._data.get('name') or '交换机'} 的 Console 口"):
+            self._goto("自由终端")
 
     def _goto_ai_diagnosis(self):
         """联动：把采集到的设备运行配置带去「AI 运维」页诊断（一次性上下文，不重复抓取）"""

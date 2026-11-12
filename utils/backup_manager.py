@@ -34,7 +34,16 @@ class BackupRecord:
 
 
 class ConfigBackupManager:
-    """配置备份管理器"""
+    """配置备份管理器（v2：备份 Git 化——学 Oxidized 的核心机制）
+
+    每台设备一个 Git 仓库目录 backups/git/<设备>/，每次 create_backup 自动 commit：
+    - 配置变更链完整可回溯（谁在何时改了哪一行 → git log -p）
+    - 任意历史版本可检出恢复
+    - git 不可用（未安装/打包环境缺 git.exe）时优雅降级为纯文件备份，不影响主流程
+    """
+
+    # Git 元信息目录名（.git 放在各设备仓库内）
+    _GIT_SUBDIR = "git"
     
     def __init__(self, backup_dir: str = None):
         if backup_dir is None:
@@ -109,11 +118,93 @@ class ConfigBackupManager:
             
             self.records.append(record)
             self._save_records()
-            
+
+            # Git 化：当前配置另存为设备仓库的 running.cfg 并自动 commit
+            # （失败不影响备份主流程——降级为纯文件备份）
+            self._git_snapshot(config_content, record)
+
             return backup_id
         except Exception as e:
             print(f"创建备份失败: {e}")
             return None
+
+    # ---------------- Git 快照层（学 Oxidized：每设备一个仓库，变更即 commit） ----------------
+    def _git_available(self) -> bool:
+        """git CLI 是否可用（缓存结果，避免每次备份都探测）"""
+        if not hasattr(self, "_git_ok"):
+            import shutil as _sh
+            self._git_ok = bool(_sh.which("git"))
+        return self._git_ok
+
+    def _device_repo_dir(self, device_name: str, device_type: str) -> str:
+        safe = f"{device_type}_{device_name}".replace(" ", "_").replace("/", "-")
+        return os.path.join(self.backup_dir, self._GIT_SUBDIR, safe)
+
+    def _git_snapshot(self, config_content: str, record: BackupRecord):
+        """把当前配置作为 running.cfg 提交到设备 Git 仓库。
+        - 首次运行自动 init 仓库（identity 用本地占位，不动全局配置）
+        - 配置无变化时跳过 commit（不产生噪声提交）
+        - 异常一律吞掉（备份本身已成功，Git 层失败只降级）"""
+        try:
+            if not self._git_available():
+                return
+            import subprocess
+            repo = self._device_repo_dir(record.device_name, record.device_type)
+            os.makedirs(repo, exist_ok=True)
+            cfg_path = os.path.join(repo, "running.cfg")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                f.write(config_content)
+
+            def git(*args):
+                return subprocess.run(
+                    ["git", "-C", repo] + list(args),
+                    capture_output=True, text=True, timeout=30,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+            if not os.path.isdir(os.path.join(repo, ".git")):
+                r = git("init", "-q")
+                if r.returncode != 0:
+                    return
+                git("config", "user.name", "NetOps-Toolkit")
+                git("config", "user.email", "netops@local")
+
+            git("add", "running.cfg")
+            # 变更检测：无 diff 不提交
+            staged = git("diff", "--cached", "--quiet")
+            if staged.returncode == 0:
+                return   # 配置无变化
+            msg = (f"backup {record.backup_time} [{record.device_type}/{record.device_name}] "
+                   + (record.description or "config backup"))
+            git("commit", "-q", "-m", msg[:200])
+        except Exception as e:
+            # Git 层失败只降级，不影响备份功能
+            print(f"[backup-git] 快照提交跳过: {e}")
+
+    def git_history(self, device_name: str, device_type: str, limit: int = 50) -> List[Dict]:
+        """设备配置变更历史（git log 一页式），供 UI 展示与回溯。
+        返回 [{commit, date, message}]；git 不可用或无仓库返回 []"""
+        try:
+            if not self._git_available():
+                return []
+            import subprocess
+            repo = self._device_repo_dir(device_name, device_type)
+            if not os.path.isdir(os.path.join(repo, ".git")):
+                return []
+            r = subprocess.run(
+                ["git", "-C", repo, "log", f"-{limit}", "--pretty=format:%h%x09%ad%x09%s",
+                 "--date=format:%Y-%m-%d %H:%M:%S"],
+                capture_output=True, text=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            if r.returncode != 0:
+                return []
+            out = []
+            for ln in (r.stdout or "").splitlines():
+                parts = ln.split("\t", 2)
+                if len(parts) == 3:
+                    out.append({"commit": parts[0], "date": parts[1], "message": parts[2]})
+            return out
+        except Exception:
+            return []
     
     def restore_backup(self, backup_id: str) -> Optional[str]:
         """恢复配置备份"""

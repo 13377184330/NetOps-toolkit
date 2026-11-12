@@ -460,6 +460,26 @@ class TerminalTab(QWidget):
         if at_bottom:
             sb.setValue(sb.maximum())
 
+    def prefill_console(self, port: str, baud: int = 9600, note: str = ""):
+        """外部联动预填（拓扑页双击节点进 CLI 等）：选好串口/波特率并提示，
+        连接动作仍由用户点击（不自动连——保持操作可见性）"""
+        if not port:
+            return False
+        for i in range(self.port_combo.count()):
+            if port in self.port_combo.itemText(i):
+                self.port_combo.setCurrentIndex(i)
+                break
+        else:
+            self.refresh_ports()
+            for i in range(self.port_combo.count()):
+                if port in self.port_combo.itemText(i):
+                    self.port_combo.setCurrentIndex(i)
+                    break
+        self.baud_spin.setValue(baud)
+        self._term_note(f"[终端] {note or '已从拓扑带入 Console 口'} {port} @ {baud}"
+                        "——点「连接」开始交互")
+        return True
+
     def _term_note(self, text: str):
         """本页提示行（区别于设备回显，带前缀）"""
         self.term_view.moveCursor(QTextCursor.End)
