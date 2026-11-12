@@ -819,6 +819,11 @@ class TopologyView(QGraphicsView):
         super().__init__(scene, parent)
         self.setRenderHint(QPainter.Antialiasing)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # 拖动残影根治（真机实锤）：主窗口 WA_TranslucentBackground（无边框半透明）下，
+        # 默认 MinimalViewportUpdate 的局部重绘没有不透明背景可擦除，拖动节点时旧位置
+        # 残留浅蓝残影——半透明窗口内的 QGraphicsView 必须全量重绘视口（Qt 官方口径）。
+        # 拓扑画布节点少，全量每帧 <5ms，性能无感。
+        self.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         # 不开鼠标跟踪时 hover 事件只在按住按键时才产生，悬停高亮会是死的（真机实测发现）
         self.setMouseTracking(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
