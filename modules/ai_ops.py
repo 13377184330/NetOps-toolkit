@@ -122,11 +122,11 @@ def stream_chat(messages, on_delta=None, config=None, timeout=(10, 120)):
                     if on_delta:
                         on_delta(delta)
     except requests.exceptions.ConnectionError:
-        return "", "连接失败：请检查 API 地址与网络（本地服务确认已启动）"
+        return "".join(chunks), "连接失败：请检查 API 地址与网络（本地服务确认已启动）"
     except requests.exceptions.Timeout:
-        return "", "请求超时：API 长时间无响应，可重试或换本地模型"
+        return "".join(chunks), "请求超时：API 长时间无响应，可重试或换本地模型"
     except Exception as e:
-        return "", f"{type(e).__name__}: {e}"
+        return "".join(chunks), f"{type(e).__name__}: {e}"
     return "".join(chunks), None
 
 
@@ -215,11 +215,13 @@ def classify_command(cmd: str) -> str:
 
 
 # ---------------------------------------------------------------- 解析 AI 输出
-_FENCE_RE = re.compile(r"```(?:netcfg|cli|bash|shell)?[ \t]*\r?\n(.*?)```", re.S)
+# fenced 代码块与命令行注释切分：引擎解析与 GUI 聊天渲染共用同一份正则/切分，
+# 避免 ai_ops_tab 重复定义导致两处口径漂移
+CMD_FENCE_RE = re.compile(r"```(?:netcfg|cli|bash|shell)?[ \t]*\r?\n(.*?)```", re.S)
 _NOTE_RE = re.compile(r"\s+#\s*(?=\S)(.+)$")
 
 
-def _split_note(line: str):
+def split_cmd_note(line: str):
     """`cmd  # 中文释义` → (cmd, note)；命令体内没有注释时 note 为空"""
     m = _NOTE_RE.search(line)
     if m:
@@ -233,13 +235,13 @@ def parse_command_blocks(text: str) -> list:
     行首 <host> / [host] 提示符自动剥除；块内空行/注释行跳过；完全重复命令去重。"""
     cards = []
     seen = set()
-    for blk in _FENCE_RE.findall(text or ""):
+    for blk in CMD_FENCE_RE.findall(text or ""):
         for raw in blk.splitlines():
             s = raw.strip()
             if not s or s.startswith("#"):
                 continue
             s = re.sub(r"^(?:<[A-Za-z0-9\-_.@]+>|\[[A-Za-z0-9\-_.@]+\])\s*", "", s)
-            cmd, note = _split_note(s)
+            cmd, note = split_cmd_note(s)
             if not cmd:
                 continue
             key = re.sub(r"\s+", " ", cmd.lower())

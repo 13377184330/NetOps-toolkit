@@ -15,7 +15,6 @@ AI 不可用时 gen 模式自动降级离线规则引擎（modules.nl_engine）�
 """
 
 import html as _html
-import re
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
@@ -52,7 +51,7 @@ class _StreamWorker(QThread):
     """AI 流式对话（网络阻塞放子线程，delta 信号驱动 UI 实时渲染）"""
     delta = pyqtSignal(str)
     ok = pyqtSignal(str)
-    failed = pyqtSignal(str)
+    failed = pyqtSignal(str, str)   # (err, 已生成的部分文本，可能非空)
 
     def __init__(self, messages, config, parent=None):
         super().__init__(parent)
@@ -65,7 +64,7 @@ class _StreamWorker(QThread):
             on_delta=lambda t: self.delta.emit(t),
             config=self._config)
         if err:
-            self.failed.emit(err)
+            self.failed.emit(err, full or "")
         else:
             self.ok.emit(full or "")
 
@@ -426,7 +425,7 @@ class AIOpsTab(QWidget):
         cur.insertHtml(_html.escape(text))
 
     def _append_ai_final(self, full, n_cards, n_danger):
-        self._history.append({"role": "assistant", "content": full})
+        self._append_history("assistant", full)
         self._rerender()
         if n_cards:
             warn = f"，其中高危 {n_danger} 条" if n_danger else ""
@@ -469,7 +468,7 @@ class AIOpsTab(QWidget):
         mode = self._mode()
         vendor = self._vendor()
         self._append_user(text)
-        self._history.append({"role": "user", "content": text})
+        self._append_history("user", text)
 
         cfg = ai_ops.get_ai_config()
         messages = ai_ops.build_messages(mode, vendor, self._history[:-1], text)
@@ -484,7 +483,8 @@ class AIOpsTab(QWidget):
         self._stream_worker = _StreamWorker(messages, cfg)
         self._stream_worker.delta.connect(self._on_delta)
         self._stream_worker.ok.connect(lambda full: self._on_stream_ok(full, mode, vendor))
-        self._stream_worker.failed.connect(lambda err: self._on_stream_failed(err, mode, vendor, text))
+        self._stream_worker.failed.connect(
+            lambda err, partial: self._on_stream_failed(err, mode, vendor, text, partial))
         self._stream_worker.start()
 
     def _stop_stream(self):
@@ -514,8 +514,19 @@ class AIOpsTab(QWidget):
         self._append_ai_final(full, len(cards), n_danger)
         self._restore_after_stream()
 
-    def _on_stream_failed(self, err, mode, vendor, user_text):
+    def _on_stream_failed(self, err, mode, vendor, user_text, partial=""):
         if self._aborted:
+            return
+        # 网络中断但已生成部分内容：保留并解析入队，不再降级规则引擎（避免两套命令混杂）
+        if partial and partial.strip():
+            self._sys_line(f"⚠ 连接中断（{err}），已保留部分生成内容。")
+            cards = ai_ops.parse_command_blocks(partial)
+            if cards:
+                ai_ops.lint_cards(cards, vendor)
+                self._queue_cards(cards, source="AI（部分）")
+            n_danger = sum(1 for c in cards if c["risk"] == "dangerous")
+            self._append_ai_final(partial, len(cards), n_danger)
+            self._restore_after_stream()
             return
         self._sys_line(f"AI 调用失败：{err}")
         if mode == "gen":
@@ -539,6 +550,13 @@ class AIOpsTab(QWidget):
         self.stop_btn.setVisible(False)
         self._sync_status()
         self._auto_scroll()
+
+    _MAX_HISTORY = 50   # 最多保留 25 轮对话（user+assistant 各一条），防长期会话内存膨胀
+
+    def _append_history(self, role, content):
+        self._history.append({"role": role, "content": content})
+        if len(self._history) > self._MAX_HISTORY:
+            self._history = self._history[-self._MAX_HISTORY:]
 
     def _last_user_text(self):
         for m in reversed(self._history):
@@ -618,6 +636,18 @@ class AIOpsTab(QWidget):
         badge.setToolTip(f"来源：{card.get('source', 'AI')}")
         top.addWidget(badge)
 
+        edit_btn = QPushButton("✎")
+        edit_btn.setFixedSize(26, 26)
+        edit_btn.setCursor(Qt.PointingHandCursor)
+        edit_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; border: none;
+                color: {ACCENT}; font-size: 13px; }}
+            QPushButton:hover {{ color: {TEXT}; }}
+        """)
+        edit_btn.setToolTip("就地编辑这条命令（改完参数需重新核验）")
+        edit_btn.clicked.connect(lambda _=False, i=idx: self._edit_card(i))
+        top.addWidget(edit_btn)
+
         if card["risk"] == "dangerous":
             del_btn = QPushButton("✕")
             del_btn.setFixedSize(26, 26)
@@ -665,6 +695,27 @@ class AIOpsTab(QWidget):
         if 0 <= idx < len(self._cards):
             self._cards.pop(idx)
             self._refresh_queue()
+
+    def _edit_card(self, idx):
+        """就地编辑命令：改完后重新分类风险 + 重新注释 + 重新语法体检，并取消勾选重新核验"""
+        if not (0 <= idx < len(self._cards)):
+            return
+        card = self._cards[idx]
+        from PyQt5.QtWidgets import QInputDialog, QLineEdit
+        new_cmd, ok = QInputDialog.getText(
+            self, "编辑命令", "修改命令内容（注释自动重新解析）：",
+            QLineEdit.Normal, card["cmd"])
+        if not ok:
+            return
+        new_cmd = new_cmd.strip()
+        if not new_cmd or new_cmd == card["cmd"]:
+            return
+        card["cmd"] = new_cmd
+        card["risk"] = ai_ops.classify_command(new_cmd)
+        card["note"] = ai_ops.split_cmd_note(new_cmd)[1] or ai_ops.note_of(new_cmd)
+        card["checked"] = False   # 命令已变，重新核验后由用户再勾选
+        ai_ops.lint_cards([card], self._vendor())
+        self._refresh_queue()
 
     def _clear_queue(self):
         if self._cards:
@@ -726,14 +777,14 @@ class AIOpsTab(QWidget):
 
 
 # ---------------------------------------------------------------- AI 正文渲染（命令块着色）
-_FENCE_FIND = re.compile(r"```(?:netcfg|cli|bash|shell)?[ \t]*\r?\n(.*?)```", re.S)
+# fence 正则与命令注释切分复用 ai_ops.CMD_FENCE_RE / split_cmd_note（口径唯一）
 
 
 def _render_ai_content(text: str) -> str:
     """AI 回复 → 气泡内 HTML：fenced 命令块渲染为深色代码卡（高危行标红）
     色值 theme.t() 现取——QTextBrowser 的 HTML 不走 QSS 重映射，双主题必须现取"""
     out, last = [], 0
-    for m in _FENCE_FIND.finditer(text or ""):
+    for m in ai_ops.CMD_FENCE_RE.finditer(text or ""):
         seg = text[last:m.start()]
         if seg.strip():
             out.append(_html.escape(seg).replace("\n", "<br>"))
@@ -741,7 +792,7 @@ def _render_ai_content(text: str) -> str:
         for raw in m.group(1).splitlines():
             if not raw.strip():
                 continue
-            cmd, note = _split_line_note(raw)
+            cmd, note = ai_ops.split_cmd_note(raw.strip())
             risk = ai_ops.classify_command(cmd)
             color = theme.t("danger") if risk == "dangerous" else theme.t("preview_text")
             note_html = (f'<span style="color:{theme.t("preview_ph")}">  # {_html.escape(note)}</span>'
@@ -757,10 +808,3 @@ def _render_ai_content(text: str) -> str:
     if tail.strip():
         out.append(_html.escape(tail).replace("\n", "<br>"))
     return "".join(out) or "（空回复）"
-
-
-def _split_line_note(line: str):
-    m = re.search(r"\s+#\s*(.+)$", line)
-    if m:
-        return line[:m.start()].rstrip(), m.group(1).strip()
-    return line.strip(), ""
