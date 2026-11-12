@@ -14,6 +14,7 @@ templates/custom_templates.json
 
 # 备份与数据
 backups/
+audit/
 data/*.db
 
 # Node（历史遗留，Web 方向已移除）

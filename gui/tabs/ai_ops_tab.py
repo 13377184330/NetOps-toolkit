@@ -45,6 +45,20 @@ _PLACEHOLDER = {
     "chat": "任何网络运维问题都可以问：原理、排错思路、命令语义…",
 }
 
+# 高频场景模板（点选即填充到输入框，示例参数改成真实值后发送）
+_SCENE_TEMPLATES = [
+    ("（选择场景模板…）", ""),
+    ("接入交换机标准开局", "新交换机接入开局：sysname 改成 SW-01，管理 VLAN 10 配 IP 192.168.10.1/24，"
+     "开启 SSH 账号 admin 密码 Admin@123，NTP 同步到 10.0.0.1，关闭未使用端口"),
+    ("教育城域网 VLAN 划分", "教育城域网改造：创建 VLAN 10 20 30，接入端口 gi1/0/1-24 按楼层划入对应 VLAN（access），"
+     "上联口 XGE1/0/25 做 trunk 放行 VLAN 10 20 30"),
+    ("DHCP Snooping 防私接", "开启 DHCP Snooping，上联口 XGE1/0/25 设 trust，接入口 gi1/0/1-24 设 untrust，"
+     "并开启 ARP 检测防私接"),
+    ("端口批量划 Access VLAN", "把端口 gi1/0/1 到 gi1/0/24 批量划入 VLAN 10，端口类型 access"),
+    ("Trunk 放行 VLAN", "把 GE1/0/24 配成 trunk，放行 VLAN 10 20 30"),
+    ("SSH 远程管理开通", "开启 SSH 远程管理，创建账号 admin 密码 Admin@123，限制只允许 192.168.10.0/24 网段登录"),
+]
+
 
 # ================================================================ 后台线程
 class _StreamWorker(QThread):
@@ -88,19 +102,67 @@ class _SendWorker(QThread):
             self.done.emit(False, f"{type(e).__name__}: {e}")
 
 
+class _FetchWorker(QThread):
+    """SSH 抓取设备 running-config（诊断分析喂上下文 / 下发前变更备份，阻塞放子线程）"""
+    done = pyqtSignal(bool, str)   # (ok, config_or_error)
+
+    def __init__(self, device, password, parent=None):
+        super().__init__(parent)
+        self._device = device
+        self._password = password
+
+    def run(self):
+        try:
+            ok, cfg = device_connector.fetch_running_config(self._device, self._password)
+            self.done.emit(ok, cfg)
+        except Exception as e:
+            self.done.emit(False, f"{type(e).__name__}: {e}")
+
+
+class _BatchSendWorker(QThread):
+    """多设备批量下发（线程池，阻塞放子线程，进度信号驱动 UI）"""
+    progress = pyqtSignal(int, int)   # (done, total)
+    done = pyqtSignal(dict)           # {device_id: (ok, log)}
+
+    def __init__(self, devices, cmd_text, password_getter, parent=None):
+        super().__init__(parent)
+        self._devices = devices
+        self._cmd_text = cmd_text
+        self._password_getter = password_getter
+
+    def run(self):
+        def task(device, password):
+            return device_connector.send_config(device, password, self._cmd_text, timeout=60)
+        results = device_connector.batch_execute(
+            self._devices, task, self._password_getter,
+            progress_cb=lambda d, t: self.progress.emit(d, t))
+        self.done.emit(results)
+
+
 # ================================================================ 下发确认弹窗
 class _DeployConfirmDialog(BaseDialog):
-    """下发前最后一道闸：命令全文 + 高危横幅 + 责任勾选（不勾选无法确认）"""
+    """下发前最后一道闸：命令全文 + 变更前备份状态 + 高危横幅 + 责任勾选（不勾选无法确认）"""
 
-    def __init__(self, parent, device_label, cmd_lines, danger_count):
+    def __init__(self, parent, device_label, cmd_lines, danger_count,
+                 backup_ok=None, backup_text=""):
         super().__init__("确认下发到设备", "", parent,
-                         min_width=660, min_height=520, scrollable=True)
+                         min_width=660, min_height=540, scrollable=True)
         self._confirmed = False
         lay = self.content_layout()
 
         dev = QLabel(f"目标设备：{device_label}")
         dev.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT};")
         lay.addWidget(dev)
+
+        if backup_text:
+            bg, fg = ("#EAF6EF", "#1E9E5A") if backup_ok else ("#FDF3E7", "#B7791F")
+            backup_l = QLabel(backup_text)
+            backup_l.setWordWrap(True)
+            backup_l.setStyleSheet(f"""
+                background: {bg}; color: {fg}; border-radius: 10px;
+                padding: 8px 12px; font-size: 12px; font-weight: bold;
+            """)
+            lay.addWidget(backup_l)
 
         body = QTextEdit()
         body.setReadOnly(True)
@@ -160,6 +222,9 @@ class AIOpsTab(QWidget):
         self._aborted = False       # 用户点了停止（后续 delta 丢弃）
         self._stream_worker = None
         self._send_worker = None
+        self._fetch_worker = None
+        self._backup_worker = None
+        self._pending_deploy = None
         self._device_ids = []       # combo index -> device_id
         self.initUI()
 
@@ -213,6 +278,12 @@ class AIOpsTab(QWidget):
         cfg_btn.setToolTip("配置模型服务商 / 地址 / Key（设置对话框 → AI 页）")
         cfg_btn.clicked.connect(self._open_ai_settings)
         bar.addWidget(cfg_btn)
+
+        self.attach_cb = QCheckBox("附加设备配置")
+        self.attach_cb.setChecked(True)
+        self.attach_cb.setToolTip("诊断分析时先 SSH 抓取目标设备 running-config 一起发给 AI，"
+                                  "让 AI 结合真实配置定位异常（需已选设备并保存凭据）")
+        bar.addWidget(self.attach_cb)
         lay.addLayout(bar)
 
         # ---- 聊天区 ----
@@ -267,6 +338,13 @@ class AIOpsTab(QWidget):
 
         q_bar.addStretch()
 
+        self.batch_btn = QPushButton("批量下发")
+        self.batch_btn.setObjectName("secondaryButton")
+        self.batch_btn.setCursor(Qt.PointingHandCursor)
+        self.batch_btn.setToolTip("把勾选的命令批量下发到多台设备（逐台展示目标，统一确认）")
+        self.batch_btn.clicked.connect(self._batch_deploy)
+        q_bar.addWidget(self.batch_btn)
+
         self.deploy_btn = QPushButton("确认下发")
         self.deploy_btn.setObjectName("primaryButton")
         self.deploy_btn.setCursor(Qt.PointingHandCursor)
@@ -291,6 +369,20 @@ class AIOpsTab(QWidget):
         self.queue_scroll.setWidget(self.queue_host)
         q_lay.addWidget(self.queue_scroll)
         lay.addWidget(queue_group, 2)
+
+        # ---- 场景模板行（点选填充输入框，改示例参数后发送）----
+        tpl_bar = QHBoxLayout()
+        tpl_bar.setSpacing(8)
+        tpl_bar.addWidget(QLabel("场景模板:"))
+        self.scene_combo = QComboBox()
+        for label, prompt in _SCENE_TEMPLATES:
+            self.scene_combo.addItem(label, prompt)
+        self.scene_combo.setMinimumWidth(220)
+        self.scene_combo.setToolTip("高频场景一键填充需求描述，改示例参数后发送")
+        self.scene_combo.activated.connect(self._apply_scene_template)
+        tpl_bar.addWidget(self.scene_combo)
+        tpl_bar.addStretch()
+        lay.addLayout(tpl_bar)
 
         # ---- 输入区 ----
         input_group = QWidget()
@@ -354,6 +446,14 @@ class AIOpsTab(QWidget):
 
     def _on_mode_changed(self):
         self.input_view.setPlaceholderText(_PLACEHOLDER[self._mode()])
+
+    def _apply_scene_template(self, _idx):
+        """点选场景模板 → 填充输入框，随后复位到占位项"""
+        prompt = self.scene_combo.currentData()
+        if prompt:
+            self.input_view.setPlainText(prompt)
+            self.input_view.setFocus()
+        self.scene_combo.setCurrentIndex(0)
 
     # ---------------------------------------------------------------- 小工具
     def _mode(self):
@@ -470,9 +570,54 @@ class AIOpsTab(QWidget):
         self._append_user(text)
         self._append_history("user", text)
 
-        cfg = ai_ops.get_ai_config()
-        messages = ai_ops.build_messages(mode, vendor, self._history[:-1], text)
+        # 诊断分析模式：可选附加目标设备运行配置（SSH 抓取，喂给 AI 做上下文）
+        if mode == "analyze" and self.attach_cb.isChecked() and self._selected_device_ready():
+            self._fetch_then_send(mode, vendor, text)
+            return
 
+        self._start_stream(mode, vendor, text)
+
+    def _selected_device_ready(self):
+        """返回 (device, password)，未选设备或无凭据时返回 None"""
+        device_id = self.device_combo.currentData()
+        if device_id is None:
+            return None
+        device = DeviceStore().get(device_id)
+        if not device:
+            return None
+        password = DeviceStore().get_plain_password(device_id)
+        if not password:
+            return None
+        return device, password
+
+    def _fetch_then_send(self, mode, vendor, text):
+        """诊断分析：先 SSH 抓取目标设备运行配置，再连同用户问题一起交给 AI"""
+        device, password = self._selected_device_ready()
+        self._sys_line(f"正在抓取 {device.get('ip')} 运行配置，用于诊断上下文…")
+        self._busy = True
+        self._aborted = False
+        self.send_btn.setVisible(False)
+        self.stop_btn.setVisible(True)
+        self._sync_status(running=True)
+        self._fetch_worker = _FetchWorker(device, password)
+        self._fetch_worker.done.connect(
+            lambda ok, cfg: self._on_fetch_done(ok, cfg, mode, vendor, text))
+        self._fetch_worker.start()
+
+    def _on_fetch_done(self, ok, config, mode, vendor, text):
+        if ok and config and config.strip():
+            enhanced = (f"【目标设备运行配置（SSH 抓取，供诊断参考）】\n{config.strip()}\n\n"
+                        f"【用户问题】\n{text}")
+            self._sys_line(f"已附加设备运行配置（{len(config)} 字符），开始诊断…")
+            self._start_stream(mode, vendor, enhanced)
+        else:
+            self._sys_line(f"设备配置抓取失败：{config}，改按纯文本问题诊断。")
+            self._start_stream(mode, vendor, text)
+
+    def _start_stream(self, mode, vendor, user_text):
+        """组装消息并启动 AI 流式对话"""
+        cfg = ai_ops.get_ai_config()
+        messages = ai_ops.build_messages(mode, vendor, self._history[:-1], user_text)
         self._busy = True
         self._aborted = False
         self.send_btn.setVisible(False)
@@ -484,7 +629,7 @@ class AIOpsTab(QWidget):
         self._stream_worker.delta.connect(self._on_delta)
         self._stream_worker.ok.connect(lambda full: self._on_stream_ok(full, mode, vendor))
         self._stream_worker.failed.connect(
-            lambda err, partial: self._on_stream_failed(err, mode, vendor, text, partial))
+            lambda err, partial: self._on_stream_failed(err, mode, vendor, user_text, partial))
         self._stream_worker.start()
 
     def _stop_stream(self):
@@ -750,27 +895,168 @@ class AIOpsTab(QWidget):
         cmd_lines = [c["cmd"] for c in picks]
         danger_n = sum(1 for c in picks if c["risk"] == "dangerous")
         dev_label = f"{device.get('name')}（{device.get('ip')} · {ai_ops.VENDOR_CN.get(device.get('vendor'), '')}）"
-        dlg = _DeployConfirmDialog(self, dev_label, cmd_lines, danger_n)
+
+        # 下发前自动备份变更前 running-config（异步），备份完成后弹确认窗
+        self._pending_deploy = (device, password, cmd_lines, danger_n, dev_label)
+        self._sys_line("正在备份变更前运行配置…")
+        self._backup_worker = _FetchWorker(device, password)
+        self._backup_worker.done.connect(self._on_backup_done)
+        self._backup_worker.start()
+
+    def _on_backup_done(self, ok, config):
+        """下发前备份完成 → 弹确认窗（含备份状态），确认后才真正下发"""
+        device, password, cmd_lines, danger_n, dev_label = self._pending_deploy
+        self._pending_deploy = None
+        backup_ok, backup_text = None, ""
+        if ok and config and config.strip():
+            backup_id = None
+            try:
+                from utils.backup_manager import ConfigBackupManager
+                backup_id = ConfigBackupManager().create_backup(
+                    config_content=config,
+                    device_name=device.get("name"),
+                    device_type=ai_ops.VENDOR_CN.get(device.get("vendor"), device.get("vendor")),
+                    ip_address=device.get("ip"),
+                    description=f"AI 下发前自动备份（{len(cmd_lines)} 条命令变更前快照）",
+                    is_auto=True,
+                )
+            except Exception:
+                backup_id = None
+            if backup_id:
+                backup_ok, backup_text = True, \
+                    f"已自动备份变更前配置（备份 ID {backup_id}），出问题可据此回滚恢复。"
+                self._sys_line(f"✅ 变更前配置已备份（ID {backup_id}）")
+            else:
+                backup_ok, backup_text = False, \
+                    "变更前配置备份存档失败，仍可继续下发（但无回滚快照）。"
+                self._sys_line("⚠ 变更前配置备份存档失败")
+        else:
+            backup_ok, backup_text = False, \
+                f"变更前配置备份失败（{config or '设备无回显'}），仍可继续下发（但无回滚快照）。"
+            self._sys_line(f"⚠ 变更前备份失败：{config}")
+
+        dlg = _DeployConfirmDialog(self, dev_label, cmd_lines, danger_n, backup_ok, backup_text)
         dlg.exec_()
         if not dlg.confirmed:
             return
+        self._do_send(device, password, cmd_lines)
 
+    def _do_send(self, device, password, cmd_lines):
         self._sys_line(f"正在下发 {len(cmd_lines)} 条命令到 {device.get('ip')}…")
         self._send_worker = _SendWorker(device, password, "\n".join(cmd_lines))
         self._send_worker.done.connect(
-            lambda ok, log: self._on_deploy_done(ok, log, device, len(cmd_lines)))
+            lambda ok, log: self._on_deploy_done(ok, log, device, cmd_lines))
         self._send_worker.start()
 
-    def _on_deploy_done(self, ok, log, device, total):
+    def _on_deploy_done(self, ok, log, device, cmd_lines):
         ip = device.get("ip")
+        self._audit_deploy(device, cmd_lines, ok, log)
         if ok:
-            self._sys_line(f"✅ 已下发 {total} 条命令到 {ip}（未存盘——验收合格后请手动 save）")
+            self._sys_line(f"✅ 已下发 {len(cmd_lines)} 条命令到 {ip}（未存盘——验收合格后请手动 save）")
             info_box(self, "下发完成",
                      f"命令已执行完毕（未存盘）。\n\n{str(log)[:400]}\n\n"
                      f"验收合格后请在设备上执行 save 存盘。")
         else:
             self._sys_line(f"❌ 下发失败：{str(log)[:120]}")
             error_box(self, "下发失败", str(log)[:600])
+        self._cards = [c for c in self._cards if not c["checked"] or c["risk"] == "readonly"]
+        self._refresh_queue()
+        self._auto_scroll()
+
+    def _audit_deploy(self, device, cmd_lines, ok, log):
+        """把 AI 下发命令写进操作审计日志（可回溯「何时给哪台下了什么」）"""
+        try:
+            from utils.audit_manager import AuditManager, AuditAction, AuditLevel
+            AuditManager().log(
+                AuditAction.AI_DEPLOY,
+                f"下发 {len(cmd_lines)} 条命令",
+                level=AuditLevel.CRITICAL if any(
+                    ai_ops.classify_command(c) == "dangerous" for c in cmd_lines)
+                else AuditLevel.WARNING,
+                device_name=device.get("name", ""),
+                device_type=ai_ops.VENDOR_CN.get(device.get("vendor"), ""),
+                details={"commands": cmd_lines, "output": str(log)[:500]},
+                result="成功" if ok else "失败",
+                ip_address=device.get("ip", ""),
+            )
+        except Exception:
+            pass   # 审计失败不影响主流程
+
+    # ---------------------------------------------------------------- 多设备批量下发
+    def _batch_deploy(self):
+        picks = [c for c in self._cards if c["checked"] and c["risk"] != "readonly"]
+        if not picks:
+            warn_box(self, "提示", "请先在队列中勾选要执行的命令")
+            return
+        store = DeviceStore()
+        candidates = [(d, bool(store.get_plain_password(d.get("id"))))
+                      for d in store.list_all()]
+        if not candidates:
+            warn_box(self, "提示", "设备清单为空，请先在「设备运维」页添加设备")
+            return
+        devices = self._select_devices(candidates)
+        if not devices:
+            return
+
+        cmd_lines = [c["cmd"] for c in picks]
+        danger_n = sum(1 for c in picks if c["risk"] == "dangerous")
+        labels = "、".join(f"{d['name']}（{d['ip']}）" for d in devices)
+        dlg = _DeployConfirmDialog(
+            self, f"{len(devices)} 台设备：{labels}", cmd_lines, danger_n,
+            backup_ok=False,
+            backup_text="批量下发不逐台自动备份（多设备逐个 SSH 抓取耗时）。"
+                        "建议先到「设备运维」页对这批设备批量备份，再回来下发。")
+        dlg.exec_()
+        if not dlg.confirmed:
+            return
+        self._do_batch_send(devices, cmd_lines)
+
+    def _select_devices(self, candidates):
+        """弹设备多选对话框，返回选中的设备 list（无密码设备置灰不可选）"""
+        from PyQt5.QtWidgets import QListWidget, QListWidgetItem
+        dlg = BaseDialog("选择批量下发设备", "勾选要下发到的设备（未保存密码的设备不可选）",
+                         self, min_width=520, min_height=400, scrollable=True)
+        lay = dlg.content_layout()
+        lst = QListWidget()
+        lst.setSelectionMode(QListWidget.MultiSelection)
+        for d, has_pw in candidates:
+            it = QListWidgetItem(f"{d.get('name')}（{d.get('ip')}）"
+                                 + ("" if has_pw else "  ⚠ 未保存密码"))
+            it.setData(Qt.UserRole, d)
+            if not has_pw:
+                it.setFlags(it.flags() & ~Qt.ItemIsEnabled)   # 无密码不可选
+            lst.addItem(it)
+        lay.addWidget(lst)
+        confirm = dlg.add_button("确定", "primary", lambda: dlg.accept(), close_on_click=False)
+        dlg.add_close_button("取消", "ghost")
+        dlg.exec_()
+        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count())
+                if lst.item(i).isSelected()]
+
+    def _do_batch_send(self, devices, cmd_lines):
+        store = DeviceStore()
+        self._sys_line(f"正在批量下发 {len(cmd_lines)} 条命令到 {len(devices)} 台设备…")
+        self._batch_worker = _BatchSendWorker(
+            devices, "\n".join(cmd_lines),
+            password_getter=lambda did: store.get_plain_password(did))
+        self._batch_worker.progress.connect(
+            lambda d, t: self._sys_line(f"批量下发进度 {d}/{t}"))
+        self._batch_worker.done.connect(lambda r: self._on_batch_done(r, cmd_lines))
+        self._batch_worker.start()
+
+    def _on_batch_done(self, results, cmd_lines):
+        store = DeviceStore()
+        ok_n = sum(1 for (ok, _) in results.values() if ok)
+        fail_n = len(results) - ok_n
+        self._sys_line(f"批量下发完成：成功 {ok_n} / 失败 {fail_n}（未存盘，验收后手动 save）")
+        for did, (ok, log) in results.items():
+            d = store.get(did) or {}
+            name = d.get("name") or did
+            ip = d.get("ip", "")
+            self._sys_line(f"{'✅' if ok else '❌'} {name}（{ip}）："
+                           + ("已执行" if ok else str(log)[:100]))
+            if d:
+                self._audit_deploy(d, cmd_lines, ok, log)
         self._cards = [c for c in self._cards if not c["checked"] or c["risk"] == "readonly"]
         self._refresh_queue()
         self._auto_scroll()

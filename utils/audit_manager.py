@@ -29,6 +29,7 @@ class AuditAction(Enum):
     SETTINGS_CHANGE = "设置修改"
     TOOL_USE = "工具使用"
     BATCH_OPERATION = "批量操作"
+    AI_DEPLOY = "AI 下发"
     DEVICE_SWITCH = "设备切换"
     LOGIN = "登录"
     LOGOUT = "登出"
