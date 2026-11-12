@@ -1664,6 +1664,7 @@ class NetworkTopologyPage(QWidget):
             buttons = [
                 ("端口面板（可视化配置）", self.show_device_panel, "primaryButton"),
                 ("端口配置（Access/Trunk）", self.show_port_config, "secondaryButton"),
+                ("AI 诊断此设备", self._goto_ai_diagnosis, "secondaryButton"),
                 ("查看完整配置", lambda: self._goto("Console 可视化"), "secondaryButton"),
                 ("配置健康度", self._show_health, "secondaryButton"),
                 ("端口一览", self.show_port_table, "secondaryButton"),
@@ -1747,6 +1748,17 @@ class NetworkTopologyPage(QWidget):
             if tw.tabText(i) == title:
                 tw.setCurrentIndex(i)
                 return
+
+    def _goto_ai_diagnosis(self):
+        """联动：把采集到的设备运行配置带去「AI 运维」页诊断（一次性上下文，不重复抓取）"""
+        main = self.window()
+        ai = getattr(main, "tabs", {}).get("ai_ops")
+        raw = (self._data or {}).get("raw") or ""
+        if ai is None or not raw.strip():
+            info_box(self, "提示", "请先点「🔌 一键采集」拿到设备运行配置，再使用 AI 诊断")
+            return
+        ai.start_external_diagnosis(
+            self._data.get("name") or "交换机", raw, self._data.get("vendor") or "")
 
     def _switch_mgmt_ip(self):
         """管理 IP：优先配置里的 Vlan-interface IP"""

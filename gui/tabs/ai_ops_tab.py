@@ -19,8 +19,8 @@ import html as _html
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGroupBox, QHBoxLayout,
-                              QLabel, QPushButton, QScrollArea, QTextBrowser,
-                              QTextEdit, QVBoxLayout, QWidget)
+                              QLabel, QPushButton, QScrollArea, QSplitter,
+                              QTextBrowser, QTextEdit, QVBoxLayout, QWidget)
 
 import os
 import sys
@@ -212,7 +212,7 @@ class _DeployConfirmDialog(BaseDialog):
 
 # ================================================================ 主页面
 class AIOpsTab(QWidget):
-    """AI 运维页：聊天区（上） + 待确认命令队列（中） + 输入区（下）"""
+    """AI 运维页：聊天区（左主视野） + 待确认命令队列（右侧栏） + 输入区（下）"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -225,6 +225,7 @@ class AIOpsTab(QWidget):
         self._fetch_worker = None
         self._backup_worker = None
         self._pending_deploy = None
+        self._external_context = ""  # 外部带入的诊断上下文（拓扑页采集的配置，一次性）
         self._device_ids = []       # combo index -> device_id
         self.initUI()
 
@@ -286,7 +287,11 @@ class AIOpsTab(QWidget):
         bar.addWidget(self.attach_cb)
         lay.addLayout(bar)
 
-        # ---- 聊天区 ----
+        # ---- 主体左右分栏：聊天区（左，主视野） + 待确认命令队列（右侧栏）----
+        # 原上下堆叠布局把聊天区挤小（演示效果差）；分栏后对话与命令审阅并排可见
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+
         self.chat_view = QTextBrowser()
         self.chat_view.setOpenExternalLinks(True)
         self.chat_view.setStyleSheet(f"""
@@ -295,10 +300,11 @@ class AIOpsTab(QWidget):
                 border-radius: 14px; padding: 14px;
             }}
         """)
-        lay.addWidget(self.chat_view, 3)
+        self.splitter.addWidget(self.chat_view)
 
-        # ---- 待确认命令队列 ----
-        queue_group = QGroupBox()
+        # ---- 待确认命令队列（右侧栏）----
+        queue_group = QGroupBox("待确认命令队列（0 条）")
+        queue_group.setMinimumWidth(320)
         queue_group.setStyleSheet(f"""
             QGroupBox {{
                 border: 1px solid {BORDER}; border-radius: 14px;
@@ -319,38 +325,35 @@ class AIOpsTab(QWidget):
         self._queue_group = queue_group
 
         q_bar = QHBoxLayout()
-        q_bar.setSpacing(8)
-        self.select_all_btn = QPushButton("全选写命令")
+        q_bar.setSpacing(6)
+        _compact = "QPushButton { padding: 7px 11px; font-size: 12px; }"   # 右栏窄，覆盖全局大 padding
+        self.select_all_btn = QPushButton("全选")
         self.select_all_btn.setObjectName("ghostButton")
+        self.select_all_btn.setStyleSheet(_compact)
         self.select_all_btn.setToolTip("勾选全部「写配置」命令（只读命令不参与下发）")
         self.select_all_btn.clicked.connect(lambda: self._toggle_all(True))
         q_bar.addWidget(self.select_all_btn)
 
-        none_btn = QPushButton("全部取消")
+        none_btn = QPushButton("取消")
         none_btn.setObjectName("ghostButton")
+        none_btn.setStyleSheet(_compact)
+        none_btn.setToolTip("取消全部勾选")
         none_btn.clicked.connect(lambda: self._toggle_all(False))
         q_bar.addWidget(none_btn)
 
-        clear_btn = QPushButton("清空队列")
+        clear_btn = QPushButton("清空")
         clear_btn.setObjectName("ghostButton")
+        clear_btn.setStyleSheet(_compact)
+        clear_btn.setToolTip("清空命令队列")
         clear_btn.clicked.connect(self._clear_queue)
         q_bar.addWidget(clear_btn)
 
-        q_bar.addStretch()
-
-        self.batch_btn = QPushButton("批量下发")
-        self.batch_btn.setObjectName("secondaryButton")
-        self.batch_btn.setCursor(Qt.PointingHandCursor)
-        self.batch_btn.setToolTip("把勾选的命令批量下发到多台设备（逐台展示目标，统一确认）")
-        self.batch_btn.clicked.connect(self._batch_deploy)
-        q_bar.addWidget(self.batch_btn)
-
-        self.deploy_btn = QPushButton("确认下发")
-        self.deploy_btn.setObjectName("primaryButton")
-        self.deploy_btn.setCursor(Qt.PointingHandCursor)
-        self.deploy_btn.setToolTip("把勾选的命令下发到目标设备（逐条人工确认后执行）")
-        self.deploy_btn.clicked.connect(self._deploy)
-        q_bar.addWidget(self.deploy_btn)
+        to_gen_btn = QPushButton("转配置页")
+        to_gen_btn.setObjectName("ghostButton")
+        to_gen_btn.setStyleSheet(_compact)
+        to_gen_btn.setToolTip("把勾选的命令转入「配置生成」页预览，继续用导出/保存模板/下发等完整功能")
+        to_gen_btn.clicked.connect(self._send_to_config_gen)
+        q_bar.addWidget(to_gen_btn)
         q_lay.addLayout(q_bar)
 
         # 队列容器：QScrollArea + 纵向直排卡片（高度自适应；不用 QListWidget——
@@ -358,8 +361,6 @@ class AIOpsTab(QWidget):
         self.queue_scroll = QScrollArea()
         self.queue_scroll.setWidgetResizable(True)
         self.queue_scroll.setFrameShape(QScrollArea.NoFrame)
-        self.queue_scroll.setMinimumHeight(150)   # 至少容下 2-3 张卡，更多走滚动
-        self.queue_scroll.setMaximumHeight(260)
         self.queue_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.queue_host = QWidget()
         self.queue_host.setStyleSheet("background: transparent;")
@@ -367,8 +368,31 @@ class AIOpsTab(QWidget):
         self.queue_lay.setContentsMargins(2, 2, 2, 2)
         self.queue_lay.setSpacing(8)
         self.queue_scroll.setWidget(self.queue_host)
-        q_lay.addWidget(self.queue_scroll)
-        lay.addWidget(queue_group, 2)
+        q_lay.addWidget(self.queue_scroll, 1)
+
+        # 下发双按钮（右栏底部，主操作固定可见）
+        act_bar = QHBoxLayout()
+        act_bar.setSpacing(8)
+        self.batch_btn = QPushButton("批量下发")
+        self.batch_btn.setObjectName("secondaryButton")
+        self.batch_btn.setCursor(Qt.PointingHandCursor)
+        self.batch_btn.setToolTip("把勾选的命令批量下发到多台设备（逐台展示目标，统一确认）")
+        self.batch_btn.clicked.connect(self._batch_deploy)
+        act_bar.addWidget(self.batch_btn)
+
+        self.deploy_btn = QPushButton("确认下发")
+        self.deploy_btn.setObjectName("primaryButton")
+        self.deploy_btn.setCursor(Qt.PointingHandCursor)
+        self.deploy_btn.setToolTip("把勾选的命令下发到目标设备（自动备份变更前配置，二次确认后执行）")
+        self.deploy_btn.clicked.connect(self._deploy)
+        act_bar.addWidget(self.deploy_btn)
+        q_lay.addLayout(act_bar)
+
+        self.splitter.addWidget(queue_group)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setSizes([860, 360])
+        lay.addWidget(self.splitter, 1)
 
         # ---- 场景模板行（点选填充输入框，改示例参数后发送）----
         tpl_bar = QHBoxLayout()
@@ -454,6 +478,44 @@ class AIOpsTab(QWidget):
             self.input_view.setPlainText(prompt)
             self.input_view.setFocus()
         self.scene_combo.setCurrentIndex(0)
+
+    # ---------------------------------------------------------------- 跨模块联动
+    def _send_to_config_gen(self):
+        """联动：把勾选的命令转入「配置生成」页预览，衔接导出/保存模板/下发完整链路"""
+        picks = [c["cmd"] for c in self._cards if c["checked"] and c["risk"] != "readonly"]
+        if not picks:
+            warn_box(self, "提示", "请先在队列中勾选要转入的命令")
+            return
+        main = self.window()
+        main._clean_config = "\n".join(picks)
+        main._render_preview()
+        for i in range(main.tab_widget.count()):
+            if main.tab_widget.tabText(i) == "配置生成":
+                main.tab_widget.setCurrentIndex(i)
+                break
+        self._sys_line(f"已把 {len(picks)} 条命令转入「配置生成」页预览，可继续导出/保存模板")
+
+    def start_external_diagnosis(self, device_label, config_text, vendor_cn=""):
+        """外部联动入口（拓扑页等调用）：带设备运行配置进入诊断分析模式。
+        config_text 作为一次性上下文随下一轮请求发出，无需再 SSH 抓取。"""
+        self._external_context = config_text or ""
+        self.mode_combo.setCurrentIndex(1)   # 诊断分析（currentIndexChanged 自动换 placeholder）
+        if vendor_cn:
+            cn2key = {cn: k for k, cn in ai_ops.VENDOR_CN.items()}
+            vkey = cn2key.get(vendor_cn)
+            if vkey:
+                for i in range(self.vendor_combo.count()):
+                    if self.vendor_combo.itemData(i) == vkey:
+                        self.vendor_combo.setCurrentIndex(i)
+                        break
+        main = self.window()
+        for i in range(main.tab_widget.count()):
+            if main.tab_widget.tabText(i) == "AI 运维":
+                main.tab_widget.setCurrentIndex(i)
+                break
+        self._sys_line(f"已带入 {device_label} 的运行配置（{len(self._external_context)} 字符）——"
+                       "输入你关心的异常现象，点「发送」开始诊断")
+        self.input_view.setFocus()
 
     # ---------------------------------------------------------------- 小工具
     def _mode(self):
@@ -570,10 +632,19 @@ class AIOpsTab(QWidget):
         self._append_user(text)
         self._append_history("user", text)
 
-        # 诊断分析模式：可选附加目标设备运行配置（SSH 抓取，喂给 AI 做上下文）
-        if mode == "analyze" and self.attach_cb.isChecked() and self._selected_device_ready():
-            self._fetch_then_send(mode, vendor, text)
-            return
+        # 诊断分析模式：外部带入的上下文（拓扑页采集）优先——数据已在手，不再 SSH 抓取
+        if mode == "analyze":
+            if self._external_context and self._external_context.strip():
+                ctx, self._external_context = self._external_context, ""   # 一次性使用
+                enhanced = (f"【目标设备运行配置（采集带入）】\n{ctx.strip()}\n\n"
+                            f"【用户问题】\n{text}")
+                self._sys_line(f"已附加带入的设备配置（{len(ctx)} 字符），开始诊断…")
+                self._start_stream(mode, vendor, enhanced)
+                return
+            # 其次按开关 SSH 抓取目标设备运行配置
+            if self.attach_cb.isChecked() and self._selected_device_ready():
+                self._fetch_then_send(mode, vendor, text)
+                return
 
         self._start_stream(mode, vendor, text)
 
