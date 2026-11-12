@@ -199,8 +199,11 @@ def parse_link_up_ports(vendor: str, text: str) -> dict:
             m = re.match(r"^([A-Za-z][\w./:-]*)\s+(up|down|adm)\b", s, re.I)
             if m:
                 name = m.group(1).rstrip(":")
-                if name.lower() not in ("interface", "link", "protocol", "duplex",
-                                        "inloop0", "reg0"):
+                nl = name.lower()
+                if nl not in ("interface", "link", "protocol", "duplex",
+                              "inloop0", "reg0", "null0", "vsi") \
+                        and not nl.startswith(("vlan-interface", "bridge-aggregation",
+                                               "route-aggregation", "tunnel")):
                     out[name] = m.group(2).lower() == "up"
         else:
             m = re.match(r"^([A-Za-z][\w./:-]*)\s+.*\b(up|down|administratively\s+down)\s+(up|down)\s*$",
@@ -307,11 +310,32 @@ class ConsoleReader:
         return raw
 
     def read_version(self):
-        """抓取版本信息（只读）"""
+        """抓取版本信息（只读）。
+        设备异步日志（% 开头的 LINK_UPDOWN/SHELL_CMD 等）可能在采集瞬间打断命令回显，
+        造成首字符被吞（真机实锤：输出出现 'splay version' 与 %Jan 残行）——
+        检测到日志混入时自动重发一次（version 命令轻量、只读、重试无风险）。"""
         if self.vendor is None:
             self.detect()
         cmd = VENDOR_VERSION_CMD.get(self.vendor, "display version")
-        return self._exec(cmd, max_wait=15)
+        raw = self._exec(cmd, max_wait=15)
+        tries = 0
+        while self._polluted(raw) and tries < 2:
+            tries += 1
+            time.sleep(0.4)
+            raw = self._exec(cmd, max_wait=15)
+        return raw
+
+    @staticmethod
+    def _polluted(text: str) -> bool:
+        """输出里混入设备异步日志（% 开头行）或命令回显残缺（首字符被吞）"""
+        for ln in text.splitlines()[:6]:
+            s = ln.strip()
+            if s.startswith("%"):
+                return True
+            # 回显残行特征：命令尾巴出现在行首缺了前缀（如 'splay version'）
+            if s.lower() in ("splay version", "splay ver", "isplay version"):
+                return True
+        return False
 
     def read_lldp(self):
         """抓取 LLDP 邻居信息（只读），用于拓扑可视化"""

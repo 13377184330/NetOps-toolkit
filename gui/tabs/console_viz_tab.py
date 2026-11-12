@@ -310,6 +310,8 @@ class ConsoleVizTab(QWidget):
 
         self._last_result = None
         self._raw_config = ""
+        self._deploy_before = ""      # 下发前快照（有值时，重采完成后自动 diff 验证）
+        self._deploy_backup_id = None
 
     # ---------------- 契约方法（主窗口切换品牌时会调用） ----------------
     def clear_config(self):
@@ -369,6 +371,11 @@ class ConsoleVizTab(QWidget):
         self._last_result = result
         self._raw_config = result["config"]
         self.raw_view.setPlainText(result["config"])
+        # 下发后自动 diff 验证（闭环）：对比下发前快照，把本次净变更打进日志——
+        # 真机实测教训：undo 反向命令可能留 VLAN 范围段拆分残留（vlan 2 to 3999 + 4001 to 4094），
+        # 只有"前快照 + 后 diff"能暴露这种文本不一致，肉眼盯回显看不出来
+        if getattr(self, "_deploy_before", ""):
+            self._report_deploy_diff(result.get("config") or "")
         # 采集保真度守卫：设备异步日志（% 开头，如端口 UP/DOWN、命令审计 SHELL_CMD）会在
         # 命令输出的抓取窗口期内混进抓取内容（真机实测：乱接线后首采比稳定值多 1 行 224 字节）。
         # 原文按收到的如实保留，但必须提醒用户而不是让日志行静默污染解析。
@@ -380,6 +387,27 @@ class ConsoleVizTab(QWidget):
         self._sync_brand_combo(result.get("vendor"))
         self._build_health(result)
         self._sync_topology(result)   # 体检结果已写入 result，拓扑面板可直接用
+
+    def _report_deploy_diff(self, after_config: str):
+        """下发后重采 vs 下发前快照的净变更，打进采集日志（闭环验证）"""
+        import difflib
+        before = self._deploy_before
+        self._deploy_before = ""
+        a = [l.rstrip() for l in before.splitlines() if l.strip()]
+        b = [l.rstrip() for l in after_config.splitlines() if l.strip()]
+        diff = list(difflib.unified_diff(a, b, "下发前", "下发后", lineterm="", n=0))
+        if not diff:
+            self.log("[验证] ✓ 重采配置与下发前快照一致——命令未产生净变更（或已完全回滚）")
+            return
+        self.log(f"[验证] 本次下发净变更 {len(diff)} 行（前 30 行如下）：")
+        for ln in diff[:30]:
+            self.log("    " + ln)
+        bid = getattr(self, "_deploy_backup_id", None)
+        if bid:
+            self.log(f"[验证] 变更前快照已自动备份（ID {bid}，backups/ 目录）——"
+                     "如需回滚可从该备份恢复")
+        self.log("[验证] 注意：undo 类命令在部分设备上会留下 VLAN 范围段拆分残留，"
+                 "请核对上述 diff 是否为预期变更")
 
     def _build_health(self, result):
         """配置健康度体检（本地规则分析，不发任何命令）"""
@@ -621,15 +649,38 @@ class ConsoleVizTab(QWidget):
             return
 
         preview = "\n".join(lines[:8]) + ("\n…" if len(lines) > 8 else "")
+        # 变更前自动快照 + 备份存档（不再依赖"建议先手动保存"的口头提示——
+        # 真机教训：undo 回滚可能留范围段拆分残留，没有快照就没法 diff 验证复原）
+        before_cfg = self._raw_config or (self._last_result or {}).get("config", "")
+        backup_id = None
+        if before_cfg.strip():
+            try:
+                from utils.backup_manager import ConfigBackupManager
+                hostname = ((self._last_result or {}).get("parsed", {})
+                            .get("basic", {}).get("主机名", "Console设备"))
+                backup_id = ConfigBackupManager().create_backup(
+                    config_content=before_cfg,
+                    device_name=hostname,
+                    device_type=VENDOR_LABELS.get((self._last_result or {}).get("vendor"), ""),
+                    description=f"Console 下发前自动备份（{len(lines)} 条命令）",
+                    is_auto=True)
+                self.log(f"[备份] 变更前配置已自动备份（ID {backup_id}），下发后自动 diff 验证")
+            except Exception as e:
+                self.log(f"[备份] 自动备份失败：{e}（继续下发，但无回滚快照）")
+        else:
+            self.log("[备份] 尚未采集过设备配置，本次下发无变更前快照（建议先「连接并读取」）")
         # 危险确认：回车默认落在「否」（安全保护，与原生 QMessageBox(No) 行为一致）
         if not question_box(
                 self, "确认下发配置",
                 f"即将向 Console 交换机（{port}）下发 {len(lines)} 条配置命令：\n\n{preview}\n\n"
                 "下发会立即改变设备运行配置（不自动存盘）。\n"
-                "建议先「保存配置文件」备份当前配置。继续？",
+                + (f"变更前配置已自动备份（ID {backup_id}），下发后将自动对比验证。\n继续？"
+                   if backup_id else "无法自动备份（未采集过配置）。继续？"),
                 ok="是", cancel="否", default="cancel"):
             return
 
+        self._deploy_before = before_cfg if backup_id else ""
+        self._deploy_backup_id = backup_id
         self.deploy_btn_c.setEnabled(False)
         self.progress.setVisible(True)
         self.progress_label.setVisible(True)
