@@ -7,3 +7,6 @@ paramiko==3.5.1
 cryptography
 requests
 pyserial
+# SNMP 采集（可选：未安装时 SNMP 巡检优雅降级，其它功能不受影响）
+pysnmp>=7.0
+

@@ -210,6 +210,33 @@ class SettingsDialog(BaseDialog):
         timeout_layout.addLayout(port_row)
 
         network_layout.addWidget(timeout_group)
+
+        # ---------------- SNMP 配置组 ----------------
+        from modules import snmp_collector as sc
+        snmp_group, snmp_layout = self._make_group("SNMP 采集（端口状态/CPU/内存 · 只读）")
+
+        cur_snmp = self.settings.get("snmp", {}) or {}
+        self.snmp_community_edit = QLineEdit(cur_snmp.get("community", "public"))
+        self.snmp_community_edit.setMinimumHeight(_FIELD_MIN_H)
+        self.snmp_community_edit.setPlaceholderText("SNMP community（v1/v2c 只读团体字）")
+        snmp_layout.addWidget(self._labeled_row("Community:", self.snmp_community_edit))
+
+        self.snmp_version_combo = self._combo(["v2c", "v1"], 0 if cur_snmp.get("version", 2) == 2 else 1)
+
+        def _vkey(i):
+            return 2 if i == 0 else 1
+        self.snmp_version_combo.currentIndexChanged.connect(
+            lambda i: self.settings.data.setdefault("snmp", {}).__setitem__("version", _vkey(i)))
+        snmp_layout.addWidget(self._labeled_row("版本:", self.snmp_version_combo))
+
+        snmp_state = ("✅ 已安装 pysnmp（SNMP 采集可用）" if sc.snmp_available()
+                      else "⚠ 未安装 pysnmp——命令行执行 pip install pysnmp 后重启软件即可启用")
+        snmp_hint = QLabel(snmp_state + "\nSNMP 仅只读采集（get/walk），软件架构层面禁止 set 写入。")
+        snmp_hint.setWordWrap(True)
+        snmp_hint.setStyleSheet("color: #5F6B7A; font-size: 12px;")
+        snmp_layout.addWidget(snmp_hint)
+
+        network_layout.addWidget(snmp_group)
         network_layout.addStretch()
 
         tabs.addTab(network_widget, "网络")
@@ -399,6 +426,11 @@ class SettingsDialog(BaseDialog):
         self.settings.set('default_ping_count', self.ping_count_spin.value())
         self.settings.set('default_timeout', self.timeout_spin.value())
         self.settings.set('default_port_timeout', self.port_timeout_spin.value())
+        # SNMP（community 不加密存本机 settings——它是共享读口令，非个人凭据）
+        self.settings.set('snmp', {
+            "community": self.snmp_community_edit.text().strip() or "public",
+            "version": 2 if self.snmp_version_combo.currentIndex() == 0 else 1,
+        })
         self._save_ai_config()
 
         info_box(self, "成功", "设置已保存，部分设置需要重启生效")

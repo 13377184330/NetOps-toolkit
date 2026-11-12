@@ -31,6 +31,7 @@ class BackupRecord:
     description: str
     is_auto: bool
     tags: List[str]
+    operator: str = ""      # 操作人（Windows 登录名；老记录无此字段兼容为空）
 
 
 class ConfigBackupManager:
@@ -84,10 +85,14 @@ class ConfigBackupManager:
         return datetime.now().strftime("%Y%m%d%H%M%S%f")
     
     def create_backup(self, config_content: str, device_name: str, device_type: str,
-                     ip_address: str = "", description: str = "", 
-                     is_auto: bool = False, tags: List[str] = None) -> Optional[str]:
-        """创建配置备份"""
+                     ip_address: str = "", description: str = "",
+                     is_auto: bool = False, tags: List[str] = None,
+                     operator: str = "") -> Optional[str]:
+        """创建配置备份（operator：操作人——默认 Windows 登录名）"""
         try:
+            if not operator:
+                import getpass
+                operator = getpass.getuser()
             backup_id = self._generate_id()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
@@ -113,7 +118,8 @@ class ConfigBackupManager:
                 md5_hash=md5_hash,
                 description=description,
                 is_auto=is_auto,
-                tags=tags or []
+                tags=tags or [],
+                operator=operator,
             )
             
             self.records.append(record)
@@ -174,6 +180,7 @@ class ConfigBackupManager:
             if staged.returncode == 0:
                 return   # 配置无变化
             msg = (f"backup {record.backup_time} [{record.device_type}/{record.device_name}] "
+                   + (f"by {record.operator} " if record.operator else "")
                    + (record.description or "config backup"))
             git("commit", "-q", "-m", msg[:200])
         except Exception as e:
@@ -273,6 +280,57 @@ class ConfigBackupManager:
         
         return sorted(results, key=lambda x: x.backup_time, reverse=True)
     
+    @staticmethod
+    def summarize_diff(diff_text: str) -> str:
+        """diff → 人话摘要（改了几口/VLAN/路由/ACL——运维视角不是行数视角）"""
+        add, rem = [], []
+        for ln in (diff_text or "").splitlines():
+            if ln.startswith("+") and not ln.startswith("+++"):
+                add.append(ln[1:].strip())
+            elif ln.startswith("-") and not ln.startswith("---"):
+                rem.append(ln[1:].strip())
+        # 高频变更域统计（以命令首词分域）
+        domains = {"端口配置": 0, "VLAN": 0, "路由": 0, "ACL/安全": 0, "其他": 0}
+        iface_names = set()
+
+        def _count(ln):
+            low = ln.lower()
+            if low.startswith(("interface", "port")):
+                domains["端口配置"] += 1
+                if low.startswith("interface"):
+                    parts = ln.split()
+                    if len(parts) > 1:
+                        iface_names.add(parts[1])
+            elif low.startswith(("vlan", "port access vlan", "port trunk permit")):
+                domains["VLAN"] += 1
+            elif "ip route" in low or low.startswith(("route", "ospf", "bgp")):
+                domains["路由"] += 1
+            elif "acl" in low or "packet-filter" in low:
+                domains["ACL/安全"] += 1
+            else:
+                domains["其他"] += 1
+
+        for ln in add + rem:
+            _count(ln)
+        # 上下文行（空格开头）里的 interface 行也算"涉及端口"——
+        # 真实 diff 常态：接口行不变，变的是它下面的子行
+        for ln in (diff_text or "").splitlines():
+            s = ln[1:].strip() if ln[:1] in (" ", "+", "-") else ln.strip()
+            if s.lower().startswith("interface "):
+                parts = s.split()
+                if len(parts) > 1:
+                    iface_names.add(parts[1])
+        parts = []
+        if iface_names:
+            parts.append(f"涉及 {len(iface_names)} 个端口")
+        for k in ("VLAN", "路由", "ACL/安全", "端口配置", "其他"):
+            if k != "端口配置" and domains[k]:
+                parts.append(f"{k} {domains[k]} 处")
+        if not parts:
+            return ""
+        summary = "，".join(parts[:4])
+        return f"{summary}（+{len(add)} -{len(rem)}）"
+
     def compare_backups(self, backup_id1: str, backup_id2: str) -> Optional[Dict]:
         """比较两个备份的差异"""
         config1 = self.restore_backup(backup_id1)

@@ -187,13 +187,19 @@ class DeviceOpsTab(QWidget):
         self.test_btn.setObjectName("secondaryButton")
         self.probe_btn = QPushButton("批量探测（TCP）")
         self.probe_btn.setObjectName("secondaryButton")
-        for b in (self.add_btn, self.edit_btn, self.del_btn, self.test_btn, self.probe_btn):
+        self.snmp_btn = QPushButton("SNMP 巡检")
+        self.snmp_btn.setObjectName("secondaryButton")
+        self.snmp_btn.setToolTip("SNMP 只读采集全部设备：端口 UP/DOWN 数量 + CPU/内存\n"
+                                 "（需设备开启 SNMP，设置 → 网络可配 community/版本）")
+        for b in (self.add_btn, self.edit_btn, self.del_btn, self.test_btn,
+                  self.probe_btn, self.snmp_btn):
             b.setStyleSheet("padding: 11px 16px;")
         for b in (self.add_btn, self.edit_btn, self.del_btn):
             btn_row.addWidget(b)
         btn_row.addStretch()
         btn_row.addWidget(self.test_btn)
         btn_row.addWidget(self.probe_btn)
+        btn_row.addWidget(self.snmp_btn)
         top_layout.addLayout(btn_row)
 
         # 空表引导（视觉审查：无数据时一片空白，分不清“没加载”还是“没设备”）
@@ -209,6 +215,7 @@ class DeviceOpsTab(QWidget):
         self.del_btn.clicked.connect(self.del_device)
         self.test_btn.clicked.connect(self.test_selected)
         self.probe_btn.clicked.connect(self.probe_all)
+        self.snmp_btn.clicked.connect(self.snmp_survey)
 
         splitter.addWidget(top_group)
 
@@ -492,5 +499,60 @@ class DeviceOpsTab(QWidget):
                 log(f"[备份] ✅ 已存档，备份 ID：{backup_id}（可在 backups/ 目录查看，历史备份支持 Diff 对比）")
             else:
                 log("[备份] ❌ 存档失败（详见控制台输出）")
+
+        self._run_async(job)
+
+    # ---------------- SNMP 巡检（只读批量采集） ----------------
+    def snmp_survey(self):
+        """SNMP 巡检全部设备：端口 UP/DOWN 统计 + CPU/内存 → 执行结果面板"""
+        from modules import snmp_collector as sc
+        if not sc.snmp_available():
+            warn_box(self, "提示", "未安装 pysnmp——命令行执行：\n\npip install pysnmp\n\n"
+                     "安装后重启软件即可使用 SNMP 巡检。")
+            return
+        devices = [d for d in self.store.list_all() if d.get("ip")]
+        if not devices:
+            info_box(self, "提示", "设备清单为空（或没有填管理 IP）")
+            return
+
+        cfg = sc.get_config()
+        community, version = cfg["community"], cfg["version"]
+
+        def job(log):
+            log(f"[SNMP] 巡检 {len(devices)} 台设备（community=***, v{version if version == 1 else '2c'}, "
+                "只读采集）…")
+            for d in devices:
+                ip = d.get("ip")
+                name = d.get("name") or ip
+                log(f"[SNMP] {name}（{ip}）探测…")
+                r = sc.probe(ip, community, version, timeout=3.0)
+                if not r.get("ok"):
+                    log(f"[SNMP] ❌ {name}: {r.get('error')}（设备未开 SNMP 或 community 不符）")
+                    continue
+                descr = (r.get("sys_descr") or "")[:60]
+                log(f"[SNMP] ✅ {name}: {descr}")
+                # 端口统计
+                ifs = sc.collect_interfaces(ip, community, version, timeout=4.0)
+                if ifs.get("ok"):
+                    log(f"[SNMP]    端口：共 {len(ifs['interfaces'])} 个，"
+                        f"UP {ifs['up_n']} / DOWN {ifs['down_n']}")
+                    down = [i["name"] for i in ifs["interfaces"] if not i["up"]][:6]
+                    if ifs["down_n"] and len(down) < ifs["down_n"]:
+                        down.append(f"…等 {ifs['down_n']} 个")
+                    if down:
+                        log(f"[SNMP]    DOWN 明细: {'、'.join(down)}")
+                # CPU/内存
+                perf = sc.collect_perf(ip, community, version, timeout=4.0)
+                if perf.get("ok"):
+                    parts = []
+                    if perf.get("cpu") is not None:
+                        parts.append(f"CPU {perf['cpu']}%")
+                    if perf.get("mem") is not None:
+                        parts.append(f"内存 {perf['mem']}%")
+                    if parts:
+                        log(f"[SNMP]    性能: {' · '.join(parts)}")
+                else:
+                    log(f"[SNMP]    性能: 未采集到（{perf.get('error', '')}）")
+            log("[SNMP] 巡检完成（结果如上；CPU/内存走厂商 OID，个别型号可能不命中）")
 
         self._run_async(job)

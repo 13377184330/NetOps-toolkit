@@ -18,17 +18,25 @@ _MONO = "font-family: 'JetBrains Mono', 'Consolas', monospace;"
 
 
 class _DiffDialog(BaseDialog):
-    """两版备份 diff 对比（等宽深色 diff 视图）"""
+    """两版备份 diff 对比（等宽深色 diff 视图 + 人话摘要）"""
 
     def __init__(self, parent, r1, r2, diff_text, stats):
         super().__init__(f"配置对比：{r1.device_name}", "", parent,
                          min_width=820, min_height=560, scrollable=True)
         lay = self.content_layout()
+        # 变更摘（运维人话：改了几口/VLAN，而不是行数）
+        summary = ConfigBackupManager.summarize_diff(diff_text)
         head = QLabel(f"{r1.backup_time}（旧） → {r2.backup_time}（新）"
                       f"　｜　新增 {stats['added']} 行 · 删除 {stats['removed']} 行 · 变更块 {stats['changed']}")
         head.setStyleSheet(f"color: {TEXT}; font-size: 13px; font-weight: bold;")
         head.setWordWrap(True)
         lay.addWidget(head)
+        if summary:
+            sum_l = QLabel("📋 " + summary)
+            sum_l.setStyleSheet("color: #B7791F; font-size: 12px; font-weight: bold;"
+                                " background: #FDF3E7; border-radius: 8px; padding: 6px 10px;")
+            sum_l.setWordWrap(True)
+            lay.addWidget(sum_l)
 
         from PyQt5.QtWidgets import QTextEdit
         body = QTextEdit()
@@ -96,14 +104,16 @@ class BackupCenterWidget(QWidget):
         lay.addLayout(sel_row)
 
         # ---- 备份列表（可勾选两行做对比） ----
-        self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["", "时间", "类型", "描述", "大小", "Git", "操作"])
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(["", "时间", "类型", "操作人", "描述", "大小", "Git", "操作"])
         self.table.setColumnWidth(0, 36)
         self.table.setColumnWidth(1, 150)
-        self.table.setColumnWidth(2, 60)
-        self.table.setColumnWidth(5, 80)
-        self.table.setColumnWidth(6, 170)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.setColumnWidth(2, 56)
+        self.table.setColumnWidth(3, 100)
+        self.table.setColumnWidth(5, 70)
+        self.table.setColumnWidth(6, 80)
+        self.table.setColumnWidth(7, 170)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -174,8 +184,10 @@ class BackupCenterWidget(QWidget):
             self.table.setItem(i, 1, QTableWidgetItem(r.backup_time))
             it_type = QTableWidgetItem("自动" if r.is_auto else "手动")
             self.table.setItem(i, 2, it_type)
-            self.table.setItem(i, 3, QTableWidgetItem(r.description or "—"))
-            self.table.setItem(i, 4, QTableWidgetItem(f"{r.file_size // 1024} KB"))
+            it_op = QTableWidgetItem(getattr(r, "operator", "") or "—")
+            self.table.setItem(i, 3, it_op)
+            self.table.setItem(i, 4, QTableWidgetItem(r.description or "—"))
+            self.table.setItem(i, 5, QTableWidgetItem(f"{r.file_size // 1024} KB"))
 
             # Git 关联（视觉评审：✓变更表意模糊 → 显示对应 commit 短哈希）
             gitmark = QTableWidgetItem("—")
@@ -183,7 +195,7 @@ class BackupCenterWidget(QWidget):
                 if r.backup_time[:16] in h.get("date", ""):
                     gitmark = QTableWidgetItem(h["commit"])
                     gitmark.setToolTip(f"本次备份对应 Git 变更 {h['commit']}：{h['message']}")
-            self.table.setItem(i, 5, gitmark)
+            self.table.setItem(i, 6, gitmark)
 
             op_row = QWidget()
             ol = QHBoxLayout(op_row)
@@ -206,7 +218,7 @@ class BackupCenterWidget(QWidget):
             ol.addWidget(view_btn)
             ol.addWidget(save_btn)
             ol.addStretch()
-            self.table.setCellWidget(i, 6, op_row)
+            self.table.setCellWidget(i, 7, op_row)
 
         # Git 变更链
         hist = self._git_hist_cache(name, dtype)
