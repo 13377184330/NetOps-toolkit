@@ -7,7 +7,7 @@
 import os
 import json
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
@@ -275,7 +275,7 @@ class AuditManager:
     
     def cleanup_old_logs(self, days: int = 90) -> int:
         """清理过期日志"""
-        cutoff = (datetime.now() - __import__('datetime').timedelta(days=days)).strftime("%Y-%m-%d")
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         
         original_count = len(self.logs)
         self.logs = [l for l in self.logs if l.timestamp >= cutoff]

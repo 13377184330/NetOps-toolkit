@@ -68,6 +68,9 @@ class _SideNavWidget(QWidget):
         self._stack = QStackedWidget()
         lay.addWidget(self._stack, 1)
 
+        # 惰性页签：row -> 工厂函数（首次切到该页才实例化，省启动时间）
+        self._lazy = {}
+
         self._nav.currentRowChanged.connect(self._on_row_changed)
 
     def select_first(self):
@@ -80,6 +83,14 @@ class _SideNavWidget(QWidget):
         self._nav.addItem(QListWidgetItem(title))
         self._stack.addWidget(widget)
         return self._stack.count() - 1
+
+    def addLazyTab(self, factory, title):
+        """惰性页签：先放占位 QWidget，首次切到该页时才调用 factory() 实例化替换。
+        用于构造耗时的页面（如拓扑页，构造含本机网卡扫描），避免拖慢启动。"""
+        placeholder = QWidget()
+        idx = self.addTab(placeholder, title)
+        self._lazy[idx] = factory
+        return idx
 
     def count(self):
         return self._stack.count()
@@ -105,5 +116,12 @@ class _SideNavWidget(QWidget):
     # ---------------- 内部 ----------------
     def _on_row_changed(self, row):
         if row >= 0:
+            factory = self._lazy.pop(row, None)
+            if factory is not None:
+                placeholder = self._stack.widget(row)
+                real = factory()
+                self._stack.removeWidget(placeholder)
+                self._stack.insertWidget(row, real)
+                placeholder.deleteLater()
             self._stack.setCurrentIndex(row)
         self.currentChanged.emit(row)

@@ -5,6 +5,8 @@
 支持华为/H3C配置生成，集成网络工具箱
 """
 
+import time
+
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTabWidget, QPushButton, QTextEdit, QLabel,
                              QFileDialog, QSplitter, QStatusBar,
@@ -26,7 +28,6 @@ from gui.tabs.interface_tab import InterfaceConfigTab
 from gui.tabs.device_ops_tab import DeviceOpsTab
 from gui.tabs.console_viz_tab import ConsoleVizTab
 from gui.tabs.terminal_tab import TerminalTab
-from gui.tabs.topology_tab import NetworkTopologyPage
 from gui.tabs.adv_config_tab import AdvConfigTab
 from gui.tabs.ai_ops_tab import AIOpsTab
 from gui.config_gen_page import ConfigGenPage
@@ -272,7 +273,6 @@ class MainWindow(QMainWindow):
             "device_ops": DeviceOpsTab(),
             "console_viz": ConsoleVizTab(),
             "terminal": TerminalTab(),
-            "topology": NetworkTopologyPage(),
             "ai_ops": AIOpsTab()
         }
         # 配置生成聚合页（配置模块收进二级导航，按使用频率排序：高频在前）
@@ -291,7 +291,8 @@ class MainWindow(QMainWindow):
         from gui.widget_utils import scroll_wrap as _sw
         self.tab_widget.addTab(_sw(self.tabs["device_ops"]), "设备运维")
         self.tab_widget.addTab(_sw(self.tabs["ai_ops"]), "AI 运维")
-        self.tab_widget.addTab(self.tabs["topology"], "网络拓扑")
+        # 拓扑页构造耗时（含本机网卡扫描），懒加载：首次切到「网络拓扑」才实例化
+        self.tab_widget.addLazyTab(self._make_topology, "网络拓扑")
         self.tab_widget.addTab(_sw(self.tabs["console_viz"]), "Console 可视化")
         self.tab_widget.addTab(self.tabs["terminal"], "自由终端")
         # 页面切换时：配置页带预览区、运维/Console 页独占全宽
@@ -455,6 +456,13 @@ class MainWindow(QMainWindow):
         self._apply_form_layout_polish()
         # 无边框窗口底色是 paintEvent 手绘的：主题切换后主动重绘
         theme.on_change(self.update)
+
+    def _make_topology(self):
+        """惰性构造拓扑页（首次切到「网络拓扑」时由 addLazyTab 调用）。
+        拓扑页构造含本机网卡扫描（getmac 子进程），耗时约 2s，放启动期会拖慢首屏。"""
+        from gui.tabs.topology_tab import NetworkTopologyPage
+        self.topology_page = NetworkTopologyPage()
+        return self.topology_page
 
     def _restore_geometry(self):
         """从 settings 恢复上次窗口尺寸（用户拖过的尺寸优先于默认值）"""
@@ -804,7 +812,6 @@ class MainWindow(QMainWindow):
     
     def open_network_tool(self, tool_name):
         """打开单个网络工具"""
-        from gui.tools_window import NetworkToolsWindow  # noqa: F401  （菜单弹窗用不到，保留导入位置）
         from gui.tools.subnet_tool import SubnetCalculatorWidget
         from gui.tools.ping_tool import PingTestWidget
         from gui.tools.port_tool import PortScanWidget
@@ -1039,7 +1046,7 @@ class MainWindow(QMainWindow):
         header_title, _ = device_headers.get(self.current_device_type, device_headers["huawei"])
         header = f"""#
 # {header_title}
-# 生成时间: {__import__('time').strftime('%Y-%m-%d %H:%M:%S')}
+# 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}
 #
 
 """
