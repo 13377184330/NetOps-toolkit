@@ -928,7 +928,7 @@ class AIOpsTab(QWidget):
             return
         card["cmd"] = new_cmd
         card["risk"] = ai_ops.classify_command(new_cmd)
-        card["note"] = ai_ops.split_cmd_note(new_cmd)[1] or ai_ops.note_of(new_cmd)
+        card["note"] = ai_ops.split_cmd_note(new_cmd)[1] or ai_ops.note_of(new_cmd) or ""
         card["checked"] = False   # 命令已变，重新核验后由用户再勾选
         ai_ops.lint_cards([card], self._vendor())
         self._refresh_queue()

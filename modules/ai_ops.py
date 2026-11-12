@@ -97,6 +97,7 @@ def stream_chat(messages, on_delta=None, config=None, timeout=(10, 120)):
     try:
         with requests.post(url, json=payload, headers=headers,
                            stream=True, timeout=timeout) as r:
+            r.encoding = "utf-8"   # 流式 chunk 无 charset，requests 默认 ISO-8859-1 会把中文解成乱码
             if r.status_code != 200:
                 try:
                     err = r.json().get("error", {}).get("message", r.text[:200])
@@ -248,7 +249,7 @@ def parse_command_blocks(text: str) -> list:
             if key in seen:
                 continue
             seen.add(key)
-            cards.append({"cmd": cmd, "note": note or note_of(cmd),
+            cards.append({"cmd": cmd, "note": note or note_of(cmd) or "",
                           "risk": classify_command(cmd)})
     return cards
 
