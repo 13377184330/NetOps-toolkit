@@ -334,12 +334,12 @@ class AIOpsTab(QWidget):
         self.select_all_btn.clicked.connect(lambda: self._toggle_all(True))
         q_bar.addWidget(self.select_all_btn)
 
-        none_btn = QPushButton("取消")
-        none_btn.setObjectName("ghostButton")
-        none_btn.setStyleSheet(_compact)
-        none_btn.setToolTip("取消全部勾选")
-        none_btn.clicked.connect(lambda: self._toggle_all(False))
-        q_bar.addWidget(none_btn)
+        self.none_btn = QPushButton("取消")
+        self.none_btn.setObjectName("ghostButton")
+        self.none_btn.setStyleSheet(_compact)
+        self.none_btn.setToolTip("取消全部勾选")
+        self.none_btn.clicked.connect(lambda: self._toggle_all(False))
+        q_bar.addWidget(self.none_btn)
 
         clear_btn = QPushButton("清空")
         clear_btn.setObjectName("ghostButton")
