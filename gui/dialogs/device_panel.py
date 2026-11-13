@@ -37,7 +37,6 @@ from modules.nl_engine import e_port_access, e_port_trunk
 from modules.config_visualizer import expand_vlan_body
 
 # ---------------------------------------------------------------- 端口方块
-CELL_W, CELL_H = 60, 56
 _PER_ROW = 10          # 电口每行格数（保证左区完整展示不被裁切，视觉审查实测）
 
 
@@ -54,102 +53,6 @@ def _state_palette(state):
     }.get(state, (t("card"), t("border")))
 
 
-class PortCell(QWidget):
-    """单个端口方块：状态底色 + 端口号 + VLAN/模式小字 + 下挂/邻居角标。
-    点击选中（发信号，Ctrl+点击加入/移出多选）。"""
-
-    clicked = pyqtSignal(str, bool)     # (端口全名, ctrl按下?)
-
-    def __init__(self, info, parent=None):
-        super().__init__(parent)
-        self.info = info                  # {name,label,state,vlan,desc,hosts,neighbor}
-        self.selected = False
-        self.setFixedSize(CELL_W, CELL_H)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setToolTip(self._tip())
-
-    def set_selected(self, on):
-        if self.selected != on:
-            self.selected = on
-            self.update()
-
-    def _tip(self):
-        i = self.info
-        state_txt = {"up": "链路 UP", "down": "链路 DOWN", "trunk": "Trunk 干道",
-                     "shutdown": "已手工关闭(shutdown)", "unknown": "链路状态未知"}[i["state"]]
-        bits = [i["name"], state_txt]
-        if i["vlan"]:
-            bits.append(f"VLAN {i['vlan']}")
-        if i["desc"]:
-            bits.append(i["desc"])
-        if i["hosts"]:
-            bits.append("下挂: " + "、".join(i["hosts"]))
-        if i["neighbor"]:
-            bits.append(f"LLDP 邻居: {i['neighbor']}")
-        bits.append("（点击选中 · Ctrl+点击多选）")
-        return "\n".join(bits)
-
-    def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.LeftButton and ev.pos() in self.rect():
-            self.clicked.emit(self.info["name"], ev.modifiers() & Qt.ControlModifier)
-        super().mouseReleaseEvent(ev)
-
-    def paintEvent(self, ev):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        i = self.info
-        bg, border = _state_palette(i["state"])
-        if self.selected:
-            bg, border = theme.t("accent_light"), theme.t("accent")
-        r = 9
-        path = QPainterPath()
-        path.addRoundedRect(0.5, 0.5, CELL_W - 1, CELL_H - 1, r, r)
-        p.fillPath(path, QBrush(QColor(bg)))
-        pen = QPen(QColor(border))
-        pen.setWidth(3 if self.selected else 1)
-        pen.setStyle(Qt.DashLine if i["state"] == "unknown" else Qt.SolidLine)
-        p.setPen(pen)
-        p.drawPath(path)
-
-        # 上半区：端口号（大字）；下半区：状态小字（VLAN/trunk/已关）——两区分离不重叠
-        f = QFont("Microsoft YaHei UI", 13)
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(QColor(theme.t("text")))          # 主题感知：深色下方块变暗，文字同步提亮
-        p.drawText(self.rect().adjusted(0, 0, 0, -18), Qt.AlignCenter, i["label"])
-
-        # VLAN 可视化：Access 口且知道 VLAN 时，格子底部画 VLAN 色条 + 小字同色，
-        # 跨口扫读一眼对上「哪些口在同一个 VLAN」（与拓扑页同色源）
-        vlan_id = i["vlan"] if (i["vlan"] or "").isdigit() else ""
-        if vlan_id:
-            p.setPen(Qt.NoPen)
-            p.setBrush(QBrush(QColor(theme.vlan_color(vlan_id))))
-            p.drawRect(3, CELL_H - 5, CELL_W - 6, 3)
-
-        small = {"up": f"V{i['vlan']}" if i["vlan"] else "up",
-                 "down": f"V{i['vlan']}" if i["vlan"] else "—",
-                 "trunk": "trunk", "shutdown": "已关",
-                 "unknown": "无数据"}.get(i["state"], "")
-        f2 = QFont("Microsoft YaHei UI", 8)
-        p.setFont(f2)
-        # VLAN 小字同色源不变（色条+文字同色便于扫读）；无 VLAN 的口用 text_sub，
-        # 比边框色深一档（视觉审查两轮指出对比不足）
-        p.setPen(QColor(theme.vlan_color(vlan_id)) if vlan_id
-                 else QColor(theme.t("text_sub")))
-        p.drawText(QRectF(2, CELL_H - 17, CELL_W - 4, 14), Qt.AlignCenter, small)
-
-        # 角标：蓝点=下挂终端 / 紫点=LLDP 邻居
-        dot_x = CELL_W - 11
-        if i["hosts"]:
-            p.setBrush(QBrush(QColor(theme.t("accent"))))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(dot_x, 5, 6, 6)
-            dot_x -= 8
-        if i["neighbor"]:
-            p.setBrush(QBrush(QColor(theme.t("port_trunk_border"))))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(dot_x, 5, 6, 6)
-        p.end()
 
 
 # ---------------------------------------------------------------- 端口数据聚合
@@ -211,7 +114,6 @@ class DevicePanelDialog(BaseDialog):
             "③ 应用到设备（会弹确认，下发后自动重新采集）",
             parent or page, min_width=1280, min_height=620, scrollable=True)
         self._vendor = vendor
-        self._cells = []                       # [PortCell]
         self._by_name = {}
         self._selected = []                    # 选中端口全名（有序）
         self._lines = []                       # [(cmd, 释义)]
@@ -221,37 +123,37 @@ class DevicePanelDialog(BaseDialog):
         body = QHBoxLayout()
         body.setSpacing(14)
 
-        # ---- 左：端口矩阵（滚动区，组内按列排布） ----
-        self._cells = []
-        for info in _aggregate_ports(data):
-            c = PortCell(info)
-            c.clicked.connect(self._on_cell_clicked)
-            self._cells.append(c)
-            self._by_name[info["name"]] = c
+        # ---- 左：端口矩阵（QGraphics 视图，组内按列排布） ----
+        # 端口数据一次装配（info dict），控件由 DevicePanelView 内部创建
+        infos = _aggregate_ports(data)
+        self._by_name = {i["name"]: i for i in infos}
         groups = []
-        for c in self._cells:
-            if groups and groups[-1][0] == c.info["group"]:
-                groups[-1][1].append(c)
+        for info in infos:
+            if groups and groups[-1][0] == info["group"]:
+                groups[-1][1].append(info)
             else:
-                groups.append((c.info["group"], [c]))
+                groups.append((info["group"], [info]))
 
         matrix_host = QWidget()
         ml = QVBoxLayout(matrix_host)
         ml.setContentsMargins(2, 2, 2, 2)
         ml.setSpacing(10)
+        # QGraphics 高性能端口矩阵（并行会话交付模块，本处完成业务集成）：
+        # QGraphicsItem 脏矩形更新替代 QWidget 逐个重绘——50+ 端口状态刷新不再整面板重建
+        from gui.widgets.device_panel_graphics import DevicePanelView
+        self._views = {}          # 分组名 -> DevicePanelView
         for gname, cells in groups:
             gl = QLabel(gname)
             gl.setStyleSheet("font-weight: bold; font-size: 12px; color: #5F6B7A;"
                               "background: transparent;")
             ml.addWidget(gl)
-            grid = QGridLayout()
-            grid.setSpacing(6)
-            for idx, c in enumerate(cells):
-                grid.addWidget(c, idx // _PER_ROW, idx % _PER_ROW)
-            # 尾部空列吃掉全部富余宽度：否则 QGridLayout 会把宽度摊进各列间隙，
-            # 造成组间首列错位、少格的组（如光口 4 格）间距异常偏大
-            grid.setColumnStretch(_PER_ROW, 1)
-            ml.addLayout(grid)
+            view = DevicePanelView(ports=list(cells),
+                                   cols=min(len(cells), _PER_ROW))
+            view.port_clicked.connect(self._on_view_port_clicked)
+            view.fit_height()
+            ml.addWidget(view)
+            self._views[gname] = view
+        self._matrix_view = self._views
         _lg = theme.t
         _lg_colors = {s: _state_palette(s)[1] for s in ("up", "down", "trunk", "shutdown")}
         legend = QLabel(
@@ -356,7 +258,54 @@ class DevicePanelDialog(BaseDialog):
                         tip="填入 Console 原文 → 弹确认 → 下发 → 自动重采")
         self.add_close_button()
 
+        # ---- 端口状态脏更新驱动（并行会话 QGraphics 模块的核心价值落地）----
+        # 面板打开期间每 2s 对比拓扑页最新 link_up，只有变化的端口走 batch_update_ports，
+        # 50+ 端口持续刷新不再整面板重建（QWidget 版每次 setStyleSheet 全量重排会卡顿）
+        from PyQt5.QtCore import QTimer
+        self._last_link_sig = self._link_signature()
+        self._live_timer = QTimer(self)
+        self._live_timer.timeout.connect(self._poll_port_states)
+        self._live_timer.start(2000)
+
+    # ---------------- 端口状态增量刷新 ----------------
+    def _link_signature(self):
+        """当前端口状态指纹（name→state 全量字符串，用于快速判断有无变化）"""
+        data = getattr(self.page, "_data", None) or {}
+        lu = data.get("link_up") or {}
+        return repr(sorted(lu.items()))
+
+    def _poll_port_states(self):
+        """数据有变化才重建 state_map（只推差异端口，不全量刷新）"""
+        data = getattr(self.page, "_data", None) or {}
+        try:
+            from gui.tabs.topology_tab import _port_state
+        except Exception:
+            return
+        sig = self._link_signature()
+        if sig == self._last_link_sig:
+            return    # 状态无变化：零重绘
+        self._last_link_sig = sig
+        link_up = data.get("link_up") or {}
+        state_map = {}
+        for name, info in self._by_name.items():
+            new_state = _port_state({"name": name, "detail": {}}, link_up)
+            if new_state != info.get("state"):
+                info["state"] = new_state
+                state_map[name] = {"state": new_state,
+                                   "vlan": info.get("vlan"),
+                                   "terminal": bool(info.get("hosts")),
+                                   "neighbor": bool(info.get("neighbor"))}
+        if state_map:
+            for view in getattr(self, "_views", {}).values():
+                view.batch_update_ports(state_map)
+
     # ---------------- 选择与联动 ----------------
+    def _on_view_port_clicked(self, name):
+        """QGraphics 端口点击：默认单选，Ctrl 多选（与旧 PortCell 交互一致）"""
+        from PyQt5.QtWidgets import QApplication as _QApp
+        ctrl = bool(_QApp.keyboardModifiers() & Qt.ControlModifier)
+        self._on_cell_clicked(name, ctrl)
+
     def _on_cell_clicked(self, name, ctrl):
         if ctrl:
             if name in self._selected:
@@ -366,15 +315,16 @@ class DevicePanelDialog(BaseDialog):
         else:
             was = name in self._selected
             self._selected = [] if (was and len(self._selected) == 1) else [name]
-        for n, c in self._by_name.items():
-            c.set_selected(n in self._selected)
+        # 选中态下发到各分组视图（QGraphicsItem.set_selected，仅重绘变化格）
+        for view in getattr(self, "_views", {}).values():
+            view.set_selected(self._selected)
         self._refresh_current()
         self._rebuild_preview()
         self._link_topology()
 
     def _refresh_current(self):
         """参数卡顶部：选中端口的当前值回显（多选时显示共同值，不一致如实标注）"""
-        sel = [self._by_name[n].info for n in self._selected if n in self._by_name]
+        sel = [self._by_name[n] for n in self._selected if n in self._by_name]
         if not sel:
             self.cur_lab.setText("👆 点击左侧端口开始")
             return
@@ -460,9 +410,7 @@ class DevicePanelDialog(BaseDialog):
     # ---------------- 命令生成 ----------------
     def _rebuild_preview(self):
         self._lines = []
-        sel = [self._by_name[n].info for n in self._selected if n in self._by_name] \
-            if self._by_name else [c.info for c in self._cells
-                                   if c.info["name"] in self._selected]
+        sel = [self._by_name[n] for n in self._selected if n in self._by_name]
         # 字段有效性红边（无论是否已选端口，填错即时给视觉反馈）
         is_access = self.mode_combo.currentIndex() == 0
         vid = self.vlan_combo.currentText().strip()
