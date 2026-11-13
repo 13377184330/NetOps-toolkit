@@ -61,13 +61,18 @@ def _ensure_loop():
     return asyncio.new_event_loop()
 
 
+def _mp_model(version):
+    """软件版本语义（1/2）→ SNMP mpModel：v1=0，v2c=1（真机实锤：mpModel=2 非法致请求无响应）"""
+    return 0 if int(version) == 1 else 1
+
+
 async def _get_one(engine, community, version, target_ip, port, oid, timeout):
     """单个 OID 的 get 请求 → (value_str, error)"""
     try:
         transport = await UdpTransportTarget.create((target_ip, port), timeout=timeout, retries=0)
         err_ind, err_status, _, varbinds = await get_cmd(
             engine,
-            CommunityData(community, mpModel=version),
+            CommunityData(community, mpModel=_mp_model(version)),
             transport,
             ContextData(),
             ObjectType(ObjectIdentity(oid)))
@@ -89,7 +94,7 @@ async def _walk_table(engine, community, version, target_ip, port, base_oid, tim
             transport = await UdpTransportTarget.create((target_ip, port), timeout=timeout, retries=0)
             err_ind, _, _, varbinds = await next_cmd(
                 engine,
-                CommunityData(community, mpModel=version),
+                CommunityData(community, mpModel=_mp_model(version)),
                 transport,
                 ContextData(),
                 ObjectType(ObjectIdentity(current)))
@@ -118,7 +123,10 @@ def _sync(coro):
 
 
 def _close_engine(engine):
-    getattr(engine, "close_dispatcher", lambda: _close_engine(engine))()
+    # pysnmp 7.x：close_dispatcher（旧名 closeDispatcher 已弃用）；两者都没有则跳过
+    fn = getattr(engine, "close_dispatcher", None) or getattr(engine, "closeDispatcher", None)
+    if fn:
+        fn()
 
 
 # ---------------------------------------------------------------- 高层采集接口
