@@ -102,31 +102,56 @@ def _match_vendor_text(text: str):
 
 
 def read_until_idle(ser: serial.Serial, idle_sec: float = 2.0, max_wait: float = 30.0,
-                    progress_cb=None):
-    """持续读取直到空闲；遇 ---- More ---- 发空格翻页（空格仅翻页不执行命令）"""
-    buf = b""
+                    progress_cb=None, max_size_mb: int = 10):
+    """持续读取直到空闲；遇 ---- More ---- 发空格翻页（空格仅翻页不执行命令）
+    
+    Args:
+        ser: 串口对象
+        idle_sec: 空闲判定时间（秒）
+        max_wait: 最大等待时间（秒）
+        progress_cb: 进度回调，参数为当前读取字节数
+        max_size_mb: 最大读取大小（MB），防止 OOM。默认 10MB
+    
+    Returns:
+        bytes: 读取的数据
+    """
+    chunks = []  # ← 改用 list + join，避免 O(n²) 复杂度
+    total_size = 0
+    max_bytes = max_size_mb * 1024 * 1024
+    
     idle = 0.0
     start = time.time()
     last_report = 0.0
+    
     while time.time() - start < max_wait:
         chunk = ser.read(ser.in_waiting or 1)
         if chunk:
-            buf += chunk
+            # OOM 防护：检查是否超过大小限制
+            if total_size + len(chunk) > max_bytes:
+                import logging
+                logging.warning(f"Console 采集数据超过 {max_size_mb}MB 限制，截断")
+                break
+            
+            chunks.append(chunk)
+            total_size += len(chunk)
             idle = 0.0
             if progress_cb and time.time() - last_report > 0.5:
-                progress_cb(len(buf))
+                progress_cb(total_size)
                 last_report = time.time()
         else:
             idle += 0.2
-            tail = buf[-40:]
-            if b"---- More ----" in tail:
-                ser.write(b" ")
-                time.sleep(0.25)
-                idle = 0.0
-                continue
+            # 检查 More 翻页标记（仅从最后 100 字节检查，避免大数据中多次扫描）
+            if total_size > 0:
+                tail = b"".join(chunks[-2:])[-100:] if len(chunks) > 0 else b""
+                if b"---- More ----" in tail:
+                    ser.write(b" ")
+                    time.sleep(0.25)
+                    idle = 0.0
+                    continue
             if idle >= idle_sec:
                 break
-    return buf
+    
+    return b"".join(chunks)  # ← O(n) 复杂度，高效
 
 
 VENDOR_CONFIG_CMD = {

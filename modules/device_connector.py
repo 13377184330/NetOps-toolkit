@@ -12,6 +12,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoTimeoutException, NetmikoAuthenticationException
 
+try:
+    from utils.logger import get_logger
+except ImportError:
+    import logging
+    get_logger = lambda name: logging.getLogger(name)
+
+logger = get_logger(__name__)
+
 
 def _enable_legacy_ssh_algorithms():
     """兼容老设备（H3C/华为旧固件）的 SSH 算法
@@ -68,6 +76,7 @@ VENDOR_LABELS = {"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷", "maipu": 
 
 def tcp_probe(ip: str, port: int = 22, timeout: float = 3.0):
     """轻量连通测试：TCP 探测 + 读取 SSH banner，不消耗登录凭据"""
+    logger.debug(f"TCP probe: {ip}:{port} (timeout={timeout}s)")
     start = time.perf_counter()
     try:
         with socket.create_connection((ip, port), timeout=timeout) as s:
@@ -77,10 +86,14 @@ def tcp_probe(ip: str, port: int = 22, timeout: float = 3.0):
             except Exception:
                 banner = ""
             latency = round((time.perf_counter() - start) * 1000, 1)
-            return True, f"端口可达（{latency} ms）" + (f" banner: {banner[:50]}" if banner else ""), latency
+            msg = f"端口可达（{latency} ms）" + (f" banner: {banner[:50]}" if banner else "")
+            logger.info(f"TCP probe success: {ip}:{port} latency={latency}ms")
+            return True, msg, latency
     except socket.timeout:
+        logger.warning(f"TCP probe timeout: {ip}:{port} (timeout={timeout}s)")
         return False, f"连接超时（{timeout}s）：{ip}:{port} 无响应", None
     except OSError as e:
+        logger.error(f"TCP probe error: {ip}:{port} {type(e).__name__}: {e}")
         return False, f"连接失败：{type(e).__name__} {e}", None
 
 

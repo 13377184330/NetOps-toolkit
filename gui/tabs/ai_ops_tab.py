@@ -601,10 +601,16 @@ class AIOpsTab(QWidget):
             f'<div style="color:{theme.t("text_sub")};font-size:11px;margin-bottom:2px;">AI</div>')
 
     def _append_stream_delta(self, text):
-        """流式期间逐段实时插入（无样式纯文本），完成后再全量重绘换样式"""
+        """流式期间逐段实时插入（无样式纯文本），完成后再全量重绘换样式
+        
+        采用增量插入避免 O(n²) 重排：cursor.insertHtml 仅附加新文本，不重新扫描整个文档。
+        不用 setPlainText/setHtml，后者会清空再重填（阻塞 UI）。
+        """
         cur = self.chat_view.textCursor()
         cur.movePosition(QTextCursor.End)
         cur.insertHtml(_html.escape(text))
+        # 更新光标位置，确保下一次 delta 继续追加在末尾
+        self.chat_view.setTextCursor(cur)
 
     def _append_ai_final(self, full, n_cards, n_danger):
         self._append_history("assistant", full)

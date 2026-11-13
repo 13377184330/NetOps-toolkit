@@ -10,6 +10,11 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 日志系统（在任何其他导入前初始化）
+from utils.logger import setup_logging, get_logger
+setup_logging()
+logger = get_logger("main")
+
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QT_VERSION_STR
 from PyQt5.QtGui import QFont, QPalette, QColor
