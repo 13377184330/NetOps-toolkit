@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title NetOps Toolkit v4.1 - 网络运维工具集
+title NetOps Toolkit v4.2 - 网络运维工具集
 
 echo ========================================
-echo NetOps Toolkit v4.1
+echo NetOps Toolkit v4.2
 echo 网络运维工具集
 echo ========================================
 echo.

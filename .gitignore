@@ -7,9 +7,8 @@ __pycache__/
 .venv/
 venv/
 
-# 敏感配置（密钥与设备清单，含加密凭据，不入库！）
-config/secret.key
-config/devices.json
+# 运行时配置目录（密钥/设备凭据/AI 设置密文/自定义模板——全目录不入库，防误提交）
+config/
 templates/custom_templates.json
 
 # 备份与数据

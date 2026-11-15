@@ -8,14 +8,13 @@
 import time
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QTabWidget, QPushButton, QTextEdit, QLabel,
-                             QFileDialog, QSplitter, QStatusBar,
-                             QListWidget, QMenu, QAction,
-                             QComboBox, QMenuBar)
-from PyQt5.QtCore import Qt, QPoint, QEvent, QObject
-from PyQt5.QtGui import QFont, QIcon, QPainter, QColor, QCursor, QGuiApplication, QPalette
+                             QPushButton, QTextEdit, QLabel,
+                             QFileDialog, QSplitter, QListWidget, QAction,
+                             QComboBox)
+from PyQt5.QtCore import Qt, QEvent, QObject
+from PyQt5.QtGui import QPainter, QColor, QCursor, QGuiApplication, QPalette
 
-from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE, BG
+from gui.styles import MODERN_STYLE, TOOLTIP_STYLE
 from gui.dialogs.base import BaseDialog, info_box, warn_box, error_box, question_box
 from gui import theme
 from gui.title_bar import FramelessTitleBar
@@ -216,7 +215,7 @@ class MainWindow(QMainWindow):
         self.initUI()
     
     def initUI(self):
-        self.setWindowTitle("NetOps Toolkit v4.1 - 网络运维工具集")
+        self.setWindowTitle("NetOps Toolkit v4.2 - 网络运维工具集")
         self.setMinimumSize(1024, 640)
         # 窗口尺寸：默认 1200x740（约7成屏）；用户拖动调整过的尺寸会被记住（key: window_geometry）
         # 比例法在不同 DPI 感知模式下结果漂移，故用绝对默认值 + 记忆用户尺寸代替
@@ -803,7 +802,7 @@ class MainWindow(QMainWindow):
         
         title, name, _ = device_names[self.current_device_type]
         # 品牌切换不再更新大标题（标题栏常驻"NetOps Toolkit"，品牌以下拉自示）
-        self.setWindowTitle(f"NetOps Toolkit v4.1 - {name}配置")
+        self.setWindowTitle(f"NetOps Toolkit v4.2 - {name}配置")
         
         for tab in self.tabs.values():
             tab.clear_config()
