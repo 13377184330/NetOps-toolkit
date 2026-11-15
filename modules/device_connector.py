@@ -97,8 +97,14 @@ def tcp_probe(ip: str, port: int = 22, timeout: float = 3.0):
         return False, f"连接失败：{type(e).__name__} {e}", None
 
 
-def build_handler(device: dict, password: str, timeout: int = 15):
-    """构造 netmiko ConnectHandler 参数"""
+def build_handler(device: dict, password: str, timeout: int = None):
+    """构造 netmiko ConnectHandler 参数。timeout=None 时读 Settings.ssh_timeout（默认 15s）"""
+    if timeout is None:
+        try:
+            from utils.settings import Settings
+            timeout = int(Settings().get("ssh_timeout", 15))
+        except Exception:
+            timeout = 15
     vendor = device.get("vendor", "huawei")
     device_type = VENDOR_NETMIKO_TYPE.get(vendor)
     if not device_type:

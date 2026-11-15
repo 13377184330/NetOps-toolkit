@@ -32,8 +32,33 @@ except ImportError:  # 直接运行本文件做自测时，把项目根目录补
     from modules.cmd_notes import note_of
     from modules import nl_engine
 
+try:
+    from utils.logger import get_logger
+except ImportError:
+    import logging
+    get_logger = lambda name: logging.getLogger(name)
+
+logger = get_logger(__name__)
+
 VENDORS = nl_engine.VENDORS            # ("huawei", "h3c", "ruijie", "maipu", "cisco")
 VENDOR_CN = nl_engine.VENDOR_CN
+
+
+def _sanitize(text: str) -> str:
+    """脱敏：把可能混入异常/日志的 API Key、Bearer token、api_key 字段打码。
+    大模型接口的 Authorization 头、URL query 里的 key 都可能在异常串里带出，
+    入日志前统一过滤（真实 Key 一旦落盘日志就等于泄露）。"""
+    if not text:
+        return text
+    s = str(text)
+    # Bearer <token>
+    s = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9_\-\.=]+", r"\1***", s)
+    # sk-xxxx / 常见 key 前缀
+    s = re.sub(r"\bsk-[A-Za-z0-9_\-]{8,}", "sk-***", s)
+    # api_key / apikey / authorization 字段值（json 或 query）
+    s = re.sub(r"(?i)(api[_-]?key[\"'\s:=]+)[A-Za-z0-9_\-\.]+", r"\1***", s)
+    s = re.sub(r"(?i)(authorization[\"'\s:=]+)[^\s\"',}]+", r"\1***", s)
+    return s
 
 # ---------------------------------------------------------------- 服务商预设
 # base_url 均为 OpenAI 兼容入口；本地两类接 vLLM / Ollama（DGX Spark 默认地址作预设）
@@ -122,12 +147,16 @@ def stream_chat(messages, on_delta=None, config=None, timeout=(10, 120)):
                     chunks.append(delta)
                     if on_delta:
                         on_delta(delta)
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
+        logger.warning("AI 接口连接失败: %s", _sanitize(e))
         return "".join(chunks), "连接失败：请检查 API 地址与网络（本地服务确认已启动）"
-    except requests.exceptions.Timeout:
+    except requests.exceptions.Timeout as e:
+        logger.warning("AI 接口请求超时: %s", _sanitize(e))
         return "".join(chunks), "请求超时：API 长时间无响应，可重试或换本地模型"
     except Exception as e:
-        return "".join(chunks), f"{type(e).__name__}: {e}"
+        # 脱敏后入日志，但 UI 返回也要脱敏（异常串可能带 Authorization 头/URL 里的 key）
+        logger.error("AI 接口调用异常: %s", _sanitize(e))
+        return "".join(chunks), _sanitize(f"{type(e).__name__}: {e}")
     return "".join(chunks), None
 
 

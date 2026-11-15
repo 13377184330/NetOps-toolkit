@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "default_timeout": 2,
     "default_ping_count": 4,
     "default_port_timeout": 1,
+    "ssh_timeout": 15,            # SSH 握手/登录超时（秒），网络差可调大
     "auto_save": True,
     "show_toolbar": True,
     "window_geometry": None,

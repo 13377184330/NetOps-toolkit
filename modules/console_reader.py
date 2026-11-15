@@ -10,6 +10,14 @@ import time
 
 import serial
 
+try:
+    from utils.logger import get_logger
+except ImportError:
+    import logging
+    get_logger = lambda name: logging.getLogger(name)
+
+logger = get_logger(__name__)
+
 # ---------------------------------------------------------------- 红线：只读命令白名单
 # 允许发送的命令模式（前缀匹配，全部为 display/show 等查询类）
 READ_ONLY_PREFIXES = (
@@ -128,8 +136,7 @@ def read_until_idle(ser: serial.Serial, idle_sec: float = 2.0, max_wait: float =
         if chunk:
             # OOM 防护：检查是否超过大小限制
             if total_size + len(chunk) > max_bytes:
-                import logging
-                logging.warning(f"Console 采集数据超过 {max_size_mb}MB 限制，截断")
+                logger.warning("Console 采集数据超过 %sMB 限制，截断", max_size_mb)
                 break
             
             chunks.append(chunk)
