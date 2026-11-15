@@ -922,10 +922,8 @@ class MainWindow(QMainWindow):
     def show_template_dialog(self):
         dialog = TemplateDialog(self.current_device_type, self)
         if dialog.exec_() == BaseDialog.Accepted:
-            if self.current_device_type == "huawei":
-                template_names = get_template_names()
-            else:
-                template_names = list(H3C_TEMPLATES.keys())
+            # 与 TemplateDialog 同源：五厂商统一按当前厂商取模板名
+            template_names = list(get_vendor_templates(self.current_device_type).keys())
             
             row = dialog.template_list.currentRow()
             if 0 <= row < len(template_names):
@@ -933,10 +931,8 @@ class MainWindow(QMainWindow):
                 self.load_template(template_name)
     
     def load_template(self, template_name):
-        if self.current_device_type == "huawei":
-            template_config = get_template_config(template_name)
-        else:
-            template_config = H3C_TEMPLATES.get(template_name, {}).get("config", {})
+        template_config = get_vendor_templates(self.current_device_type).get(
+            template_name, {}).get("config", {})
         
         if not template_config:
             warn_box(self, "警告", f"模板 {template_name} 不存在！")

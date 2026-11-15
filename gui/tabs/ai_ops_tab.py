@@ -484,6 +484,11 @@ class AIOpsTab(QWidget):
                 return True
         return super().eventFilter(obj, ev)
 
+    # ---------------- 契约方法（主窗口切换品牌/加载模板/清空配置时遍历调用） ----------------
+    def clear_config(self):
+        """AI 页独立于配置生成流程：不清聊天历史、审阅队列和输入草稿，仅满足 tabs 契约"""
+        return
+
     def showEvent(self, ev):
         super().showEvent(ev)
         self._reload_devices()   # 每次进页刷新设备清单
