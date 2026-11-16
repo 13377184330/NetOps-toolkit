@@ -206,7 +206,9 @@ def build_system_prompt(mode: str, vendor: str) -> str:
             "你是资深网络排障专家。用户会粘贴设备回显/配置/日志片段，请按固定结构输出：\n"
             "① 结论（一句话）；② 发现的异常点（指明具体行/关键值）；③ 下一步建议。\n"
             f"当前设备为 {VENDOR_CN[vendor]}（{hint}）。\n"
-            "如需补充验证命令，只允许给只读查看类命令，放进 ```netcfg 块，每行尾 \" # \" 加中文释义；"
+            "如需补充验证命令，只允许给只读查看类命令（display/show/ping 等），放进 ```netcfg 块，"
+            "每行尾 \" # \" 加中文释义——这些命令会被用户勾选后直接在设备上执行，"
+            "回显会自动回注对话，你可以基于回显继续分析（多轮排障闭环）。"
             "禁止建议任何写配置/重启/删除动作，如确有必要只做文字提醒。"
         )
     return (
@@ -216,9 +218,13 @@ def build_system_prompt(mode: str, vendor: str) -> str:
 
 
 def build_messages(mode: str, vendor: str, history: list, user_text: str) -> list:
-    """system + 最近历史 + 本轮输入（历史裁剪防上下文膨胀）"""
+    """system + 最近历史 + 本轮输入（历史裁剪防上下文膨胀）。
+    device 角色（设备回显，只读验证命令的执行结果）对模型按 user 消息注入——
+    OpenAI 协议没有 device 角色，语义上它是用户提供的设备事实。"""
     msgs = [{"role": "system", "content": build_system_prompt(mode, vendor)}]
-    msgs += history[-12:]
+    for m in history[-12:]:
+        role = "assistant" if m["role"] == "assistant" else "user"
+        msgs.append({"role": role, "content": m["content"]})
     msgs.append({"role": "user", "content": user_text})
     return msgs
 

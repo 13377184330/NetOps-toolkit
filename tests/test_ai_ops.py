@@ -37,15 +37,30 @@ print("[2] 解析风险分级：", [(c["cmd"], c["risk"]) for c in cards])
 tab = AIOpsTab()
 tab._queue_cards(cards, source="AI")
 assert len(tab._cards) == 4 and tab.queue_lay.count() >= 4
-assert not tab.deploy_btn.isEnabled(), "默认无勾选，不应可下发"
+assert not tab.deploy_btn.isEnabled(), "默认无勾选，不应可执行"
 # 勾选一条写命令
 tab._on_card_checked(0, True)
 assert tab.deploy_btn.isEnabled() and tab.deploy_btn.text().startswith("下发所选（1）")
-# readonly 不可勾选（chk 被禁用）——由 UI 层保证；逻辑层全选应跳过 readonly
+# 勾选一条只读命令（readonly 可勾选执行，运维闭环）
+tab._on_card_checked(3, True)
+assert tab.deploy_btn.text().startswith("执行所选（验证 1 · 下发 1）"), tab.deploy_btn.text()
+# 全选：readonly 也勾（只读验证命令可执行）
 tab._toggle_all(True)
 n_checked = sum(1 for c in tab._cards if c["checked"])
-assert n_checked == 3, f"全选应只勾 3 条（1 只读除外），实际 {n_checked}"
-print("[3] 队列：入队 4 条 / 全选跳过只读 / 下发按钮联动 OK")
+assert n_checked == 4, f"全选应含只读共 4 条，实际 {n_checked}"
+assert tab.deploy_btn.text().startswith("执行所选（验证 1 · 下发 3）"), tab.deploy_btn.text()
+# 执行分流：纯只读 → 轻量确认链；含写 → 备份链（这里只验分流数据，不连真机）
+picks = [c for c in tab._cards if c["checked"]]
+read_lines = [c["cmd"] for c in picks if c["risk"] == "readonly"]
+write_lines = [c["cmd"] for c in picks if c["risk"] != "readonly"]
+assert read_lines == ["display vlan"] and len(write_lines) == 3
+# 回显注入 AI 上下文：device 角色 + build_messages 映射为 user
+tab._append_device_echo("display vlan", "VLAN 10 → gigabitethernet1/0/1")
+assert tab._history[-1]["role"] == "device" and "VLAN 10" in tab._history[-1]["content"]
+msgs = ai_ops.build_messages("analyze", "huawei", tab._history, "继续分析")
+roles = [m["role"] for m in msgs]
+assert "device" not in roles and roles.count("user") >= 2, roles
+print("[3] 队列：全选含只读 / 按钮分档 / 执行分流 / 回显回注 AI 上下文 OK")
 
 # 4) 降级路径：AI 失败时规则引擎兜底进队
 fb_cards, unknown = ai_ops.fallback_parse("创建vlan10，把gi1/0/1划入vlan10", "huawei")

@@ -120,11 +120,15 @@ if cards_n:
     ai.select_all_btn.click()
     app.processEvents()
     n_checked = sum(1 for c in ai._cards if c["checked"])
-    case("C3 全选写命令（跳过只读）", n_checked == sum(1 for c in ai._cards if c["risk"] != "readonly"),
+    case("C3 全选（含只读验证命令）", n_checked == len(ai._cards),
          f"{n_checked} 勾选")
+    n_ro = sum(1 for c in ai._cards if c["checked"] and c["risk"] == "readonly")
+    case("C4 混合批次按钮分档", ai.deploy_btn.text().startswith("执行所选（") if n_ro
+         else ai.deploy_btn.text().startswith("下发所选（"),
+         ai.deploy_btn.text())
     ai.none_btn.click()
     app.processEvents()
-    case("C4 全部取消", not any(c["checked"] for c in ai._cards))
+    case("C5 全部取消", not any(c["checked"] for c in ai._cards))
 
 def visible_card_checkboxes():
     """只取 queue_lay 当前卡片行里的勾选框（用户视角的可见卡）——

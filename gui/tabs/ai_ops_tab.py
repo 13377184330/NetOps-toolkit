@@ -102,6 +102,32 @@ class _SendWorker(QThread):
             self.done.emit(False, f"{type(e).__name__}: {e}")
 
 
+class _ReadWorker(QThread):
+    """只读命令逐条执行（netmiko send_command 回显通道，阻塞放子线程）。
+    运维闭环关键件：AI 诊断产出的 display/show 验证命令可直接勾选执行，
+    回显回注对话供 AI 多轮分析（替代"只能看不能跑"的断闭环状态）。"""
+    step = pyqtSignal(str, bool, str)   # (cmd, ok, output) 逐条实时上报
+    done = pyqtSignal(int, int)         # (成功条数, 总条数)
+
+    def __init__(self, device, password, cmds, parent=None):
+        super().__init__(parent)
+        self._device = device
+        self._password = password
+        self._cmds = list(cmds)
+
+    def run(self):
+        ok_n = 0
+        for cmd in self._cmds:
+            try:
+                ok, out = device_connector.run_command(
+                    self._device, self._password, cmd, timeout=30)
+            except Exception as e:
+                ok, out = False, f"{type(e).__name__}: {e}"
+            self.step.emit(cmd, ok, out or "(无回显)")
+            ok_n += 1 if ok else 0
+        self.done.emit(ok_n, len(self._cmds))
+
+
 class _FetchWorker(QThread):
     """SSH 抓取设备 running-config（诊断分析喂上下文 / 下发前变更备份，阻塞放子线程）"""
     done = pyqtSignal(bool, str)   # (ok, config_or_error)
@@ -141,11 +167,17 @@ class _BatchSendWorker(QThread):
 
 # ================================================================ 下发确认弹窗
 class _DeployConfirmDialog(BaseDialog):
-    """下发前最后一道闸：命令全文 + 变更前备份状态 + 高危横幅 + 责任勾选（不勾选无法确认）"""
+    """执行前最后一道闸：只读验证段 + 配置下发段（命令全文 + 变更前备份状态
+    + 高危横幅 + 责任勾选）。纯只读批次是轻量确认（无责任勾选），
+    含写命令才启用责任闸门。"""
 
     def __init__(self, parent, device_label, cmd_lines, danger_count,
-                 backup_ok=None, backup_text=""):
-        super().__init__("确认下发到设备", "", parent,
+                 backup_ok=None, backup_text="", read_lines=None):
+        has_read = bool(read_lines)
+        has_write = bool(cmd_lines)
+        title = ("确认执行只读命令" if not has_write else
+                 ("确认执行到设备" if has_read else "确认下发到设备"))
+        super().__init__(title, "", parent,
                          min_width=660, min_height=540, scrollable=True)
         self._confirmed = False
         lay = self.content_layout()
@@ -154,27 +186,41 @@ class _DeployConfirmDialog(BaseDialog):
         dev.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {TEXT};")
         lay.addWidget(dev)
 
+        def code_block(lines, min_h=120):
+            b = QTextEdit()
+            b.setReadOnly(True)
+            b.setStyleSheet("""
+                font-family: 'JetBrains Mono', 'Consolas', monospace;
+                font-size: 13px; line-height: 1.6;
+                background: #1E2430; border: 1px solid #2C3444; border-radius: 12px;
+                padding: 12px; color: #C8D3E8;
+            """)
+            b.setPlainText("\n".join(lines))
+            b.setMinimumHeight(min_h)
+            return b
+
+        if has_read:
+            head = QLabel("① 只读验证命令（执行后回显自动进对话，供 AI 继续分析，不改设备任何配置）")
+            head.setStyleSheet(f"font-size: 12px; font-weight: bold; color: #1E9E5A;")
+            lay.addWidget(head)
+            lay.addWidget(code_block(read_lines, 100), 1 if not has_write else 1)
+
         if backup_text:
-            bg, fg = ("#EAF6EF", "#1E9E5A") if backup_ok else ("#FDF3E7", "#B7791F")
+            bg, fg = ("#EAF6EF", "1E9E5A") if backup_ok else ("#FDF3E7", "#B7791F")
             backup_l = QLabel(backup_text)
             backup_l.setWordWrap(True)
             backup_l.setStyleSheet(f"""
-                background: {bg}; color: {fg}; border-radius: 10px;
+                background: {bg}; color: #{fg}; border-radius: 10px;
                 padding: 8px 12px; font-size: 12px; font-weight: bold;
             """)
             lay.addWidget(backup_l)
 
-        body = QTextEdit()
-        body.setReadOnly(True)
-        body.setStyleSheet("""
-            font-family: 'JetBrains Mono', 'Consolas', monospace;
-            font-size: 13px; line-height: 1.6;
-            background: #1E2430; border: 1px solid #2C3444; border-radius: 12px;
-            padding: 12px; color: #C8D3E8;
-        """)
-        body.setPlainText("\n".join(cmd_lines))
-        body.setMinimumHeight(220)
-        lay.addWidget(body, 1)
+        if has_write:
+            head2 = QLabel(("② 配置下发命令" if has_read else "将下发的配置命令")
+                           + "（进入设备配置模式逐条执行，默认不存盘）")
+            head2.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {TEXT};")
+            lay.addWidget(head2)
+            lay.addWidget(code_block(cmd_lines, 220), 2)
 
         if danger_count:
             banner = QLabel(f"⚠ 本批含 {danger_count} 条高危命令（删配置/重启/清库/恢复出厂类），"
@@ -186,19 +232,22 @@ class _DeployConfirmDialog(BaseDialog):
             """)
             lay.addWidget(banner)
 
-        tip = QLabel("设备回显会显示在聊天区。下发默认不存盘，验收合格后请手动 save。")
+        tip = QLabel("设备回显会显示在聊天区。下发默认不存盘，验收合格后请手动 save。"
+                     if has_write else
+                     "只读命令不修改任何配置，执行失败也不影响设备状态。")
         tip.setWordWrap(True)
         tip.setStyleSheet(f"color: {TEXT_SUB}; font-size: 12px;")
         lay.addWidget(tip)
 
-        self.ack_cb = QCheckBox("我已逐条核验以上命令，知晓在真机执行的后果")
-        self.ack_cb.setMinimumHeight(26)
-        lay.addWidget(self.ack_cb)
-
-        self.btn_confirm = self.add_button("确认下发", "primary",
+        # 责任勾选闸门：仅含写命令的批次启用（纯只读无变更风险，轻量确认）
+        self.btn_confirm = self.add_button("确认执行" if has_read else "确认下发", "primary",
                                            self._confirm, close_on_click=False)
-        self.btn_confirm.setEnabled(False)
-        self.ack_cb.toggled.connect(lambda on: self.btn_confirm.setEnabled(on))
+        if has_write:
+            self.ack_cb = QCheckBox("我已逐条核验以上命令，知晓在真机执行的后果")
+            self.ack_cb.setMinimumHeight(26)
+            lay.addWidget(self.ack_cb)
+            self.btn_confirm.setEnabled(False)
+            self.ack_cb.toggled.connect(lambda on: self.btn_confirm.setEnabled(on))
         self.add_close_button("取消", "ghost")
 
     def _confirm(self):
@@ -216,7 +265,8 @@ class AIOpsTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._history = []          # [{"role": user/assistant, "content": str}]
+        self._history = []          # [{"role": user/assistant/device, "content": str}]
+                                     # device = 只读验证命令的真机回显（AI 可见，多轮排障闭环）
         self._cards = []            # 审阅队列卡片 [{"cmd","note","risk","lint","checked","source"}]
         self._busy = False          # 流式生成中
         self._aborted = False       # 用户点了停止（后续 delta 丢弃）
@@ -584,7 +634,7 @@ class AIOpsTab(QWidget):
     def _render_welcome(self):
         self.chat_view.clear()
         self._sys_line("AI 运维已就绪：命令只生成草稿、永不自动执行；"
-                       "下发前需逐条勾选并二次确认。生成配置模式离线可用（规则引擎兜底）。")
+                       "勾选后二次确认才会执行（只读验证/配置下发）。生成配置模式离线可用（规则引擎兑底）。")
 
     def _sys_line(self, text):
         """系统提示行（居中灰）——色值 theme.t() 现取，双主题可用"""
@@ -629,10 +679,12 @@ class AIOpsTab(QWidget):
         view = self.chat_view
         view.clear()
         self._sys_line("AI 运维已就绪：命令只生成草稿、永不自动执行；"
-                       "下发前需逐条勾选并二次确认。")
+                       "勾选后二次确认才会执行（只读验证/配置下发）。")
         for m in self._history:
             if m["role"] == "user":
                 self._append_user(m["content"])
+            elif m["role"] == "device":
+                view.append(self._device_block_html(m["content"]))
             else:
                 view.append(self._ai_bubble(m["content"]))
 
@@ -907,8 +959,7 @@ class AIOpsTab(QWidget):
         chk.setMinimumHeight(20)                     # 防布局压缩把指示器挤扁
         chk.setChecked(bool(card["checked"]))
         if card["risk"] == "readonly":
-            chk.setEnabled(False)
-            chk.setToolTip("只读命令不参与下发，仅供核对设备状态")
+            chk.setToolTip("只读验证命令：勾选后执行，回显自动进对话（不改设备配置）")
         chk.toggled.connect(lambda on, i=idx: self._on_card_checked(i, on))
         top.addWidget(chk)
 
@@ -997,8 +1048,7 @@ class AIOpsTab(QWidget):
 
     def _toggle_all(self, on):
         for c in self._cards:
-            if c["risk"] != "readonly":
-                c["checked"] = on
+            c["checked"] = on
         self._refresh_queue()
 
     def _remove_card(self, idx):
@@ -1033,13 +1083,25 @@ class AIOpsTab(QWidget):
             self._refresh_queue()
 
     def _sync_deploy_btn(self):
-        n = sum(1 for c in self._cards if c["checked"] and c["risk"] != "readonly")
-        self.deploy_btn.setText(f"下发所选（{n}）" if n else "确认下发")
-        self.deploy_btn.setEnabled(n > 0)
+        """按勾选构成分档：纯验证 / 纯下发 / 混合执行（读写都有时先验证后下发）"""
+        checked = [c for c in self._cards if c["checked"]]
+        n_r = sum(1 for c in checked if c["risk"] == "readonly")
+        n_w = len(checked) - n_r
+        if n_r and n_w:
+            self.deploy_btn.setText(f"执行所选（验证 {n_r} · 下发 {n_w}）")
+        elif n_r:
+            self.deploy_btn.setText(f"执行验证（{n_r}）")
+        elif n_w:
+            self.deploy_btn.setText(f"下发所选（{n_w}）")
+        else:
+            self.deploy_btn.setText("确认执行")
+        self.deploy_btn.setEnabled(bool(checked))
 
-    # ---------------------------------------------------------------- 下发（人工确认闸门）
+    # ---------------------------------------------------------------- 执行（人工确认闸门：只读验证 + 配置下发分流）
     def _deploy(self):
-        picks = [c for c in self._cards if c["checked"] and c["risk"] != "readonly"]
+        picks = [c for c in self._cards if c["checked"]]
+        read_lines = [c["cmd"] for c in picks if c["risk"] == "readonly"]
+        write_lines = [c["cmd"] for c in picks if c["risk"] != "readonly"]
         if not picks:
             warn_box(self, "提示", "请先在队列中勾选要执行的命令")
             return
@@ -1057,54 +1119,111 @@ class AIOpsTab(QWidget):
                                   f"请先在「设备运维」页维护凭据")
             return
 
-        cmd_lines = [c["cmd"] for c in picks]
         danger_n = sum(1 for c in picks if c["risk"] == "dangerous")
         dev_label = f"{device.get('name')}（{device.get('ip')} · {ai_ops.VENDOR_CN.get(device.get('vendor'), '')}）"
+        self._pending_deploy = {
+            "device": device, "password": password,
+            "read_lines": read_lines, "write_lines": write_lines,
+            "danger_n": danger_n, "dev_label": dev_label,
+        }
+        if write_lines:
+            # 含写命令 → 下发前自动备份变更前 running-config（异步），备份完成后弹确认窗
+            self._sys_line("正在备份变更前运行配置…")
+            self._backup_worker = _FetchWorker(device, password)
+            self._backup_worker.done.connect(self._on_backup_done)
+            self._backup_worker.start()
+        else:
+            # 纯只读验证 → 无变更无风险，轻量确认后直接执行
+            self._on_backup_done(False, "", readonly_only=True)
 
-        # 下发前自动备份变更前 running-config（异步），备份完成后弹确认窗
-        self._pending_deploy = (device, password, cmd_lines, danger_n, dev_label)
-        self._sys_line("正在备份变更前运行配置…")
-        self._backup_worker = _FetchWorker(device, password)
-        self._backup_worker.done.connect(self._on_backup_done)
-        self._backup_worker.start()
-
-    def _on_backup_done(self, ok, config):
-        """下发前备份完成 → 弹确认窗（含备份状态），确认后才真正下发"""
-        device, password, cmd_lines, danger_n, dev_label = self._pending_deploy
+    def _on_backup_done(self, ok, config, readonly_only=False):
+        """备份完成 → 弹确认窗（含备份状态），确认后执行：先只读验证 → 再配置下发"""
+        job = self._pending_deploy
         self._pending_deploy = None
+        device = job["device"]
+        password = job["password"]
+        read_lines = job["read_lines"]
+        write_lines = job["write_lines"]
+        danger_n = job["danger_n"]
+
         backup_ok, backup_text = None, ""
-        if ok and config and config.strip():
-            backup_id = None
-            try:
-                from utils.backup_manager import ConfigBackupManager
-                backup_id = ConfigBackupManager().create_backup(
-                    config_content=config,
-                    device_name=device.get("name"),
-                    device_type=ai_ops.VENDOR_CN.get(device.get("vendor"), device.get("vendor")),
-                    ip_address=device.get("ip"),
-                    description=f"AI 下发前自动备份（{len(cmd_lines)} 条命令变更前快照）",
-                    is_auto=True,
-                )
-            except Exception:
+        if not readonly_only:
+            if ok and config and config.strip():
                 backup_id = None
-            if backup_id:
-                backup_ok, backup_text = True, \
-                    f"已自动备份变更前配置（备份 ID {backup_id}），出问题可据此回滚恢复。"
-                self._sys_line(f"✅ 变更前配置已备份（ID {backup_id}）")
+                try:
+                    from utils.backup_manager import ConfigBackupManager
+                    backup_id = ConfigBackupManager().create_backup(
+                        config_content=config,
+                        device_name=device.get("name"),
+                        device_type=ai_ops.VENDOR_CN.get(device.get("vendor"), device.get("vendor")),
+                        ip_address=device.get("ip"),
+                        description=f"AI 下发前自动备份（{len(write_lines)} 条命令变更前快照）",
+                        is_auto=True,
+                    )
+                except Exception:
+                    backup_id = None
+                if backup_id:
+                    backup_ok, backup_text = True, \
+                        f"已自动备份变更前配置（备份 ID {backup_id}），出问题可据此回滚恢复。"
+                    self._sys_line(f"✅ 变更前配置已备份（ID {backup_id}）")
+                else:
+                    backup_ok, backup_text = False, \
+                        "变更前配置备份存档失败，仍可继续下发（但无回滚快照）。"
+                    self._sys_line("⚠ 变更前配置备份存档失败")
             else:
                 backup_ok, backup_text = False, \
-                    "变更前配置备份存档失败，仍可继续下发（但无回滚快照）。"
-                self._sys_line("⚠ 变更前配置备份存档失败")
-        else:
-            backup_ok, backup_text = False, \
-                f"变更前配置备份失败（{config or '设备无回显'}），仍可继续下发（但无回滚快照）。"
-            self._sys_line(f"⚠ 变更前备份失败：{config}")
+                    f"变更前配置备份失败（{config or '设备无回显'}），仍可继续下发（但无回滚快照）。"
+                self._sys_line(f"⚠ 变更前备份失败：{config}")
 
-        dlg = _DeployConfirmDialog(self, dev_label, cmd_lines, danger_n, backup_ok, backup_text)
+        dlg = _DeployConfirmDialog(self, job["dev_label"], write_lines, danger_n,
+                                   backup_ok, backup_text, read_lines=read_lines)
         dlg.exec_()
         if not dlg.confirmed:
             return
-        self._do_send(device, password, cmd_lines)
+        self._exec_read_then_send(device, password, read_lines, write_lines)
+
+    # ---------------- 只读验证 → 写下发 串行执行链 ----------------
+    def _exec_read_then_send(self, device, password, read_lines, write_lines):
+        """执行顺序：先只读验证（回显回注对话）→ 再下发写命令（变更前已备份）"""
+        if read_lines:
+            self._sys_line(f"正在执行 {len(read_lines)} 条只读验证命令…")
+            self._read_worker = _ReadWorker(device, password, read_lines)
+            self._read_worker.step.connect(self._on_read_step)
+            self._read_worker.done.connect(
+                lambda ok_n, total: self._on_read_done(ok_n, total, device, password, write_lines))
+            self._read_worker.start()
+        else:
+            self._do_send(device, password, write_lines)
+
+    def _on_read_step(self, cmd, ok, output):
+        """单条验证命令回显：进聊天区 + 注入 AI 上下文（多轮排障闭环）"""
+        mark = "✅" if ok else "❌"
+        self._sys_line(f"{mark} {cmd}" + ("" if ok else f" —— {str(output)[:80]}"))
+        self._append_device_echo(cmd, output)
+
+    def _on_read_done(self, ok_n, total, device, password, write_lines):
+        self._sys_line(f"只读验证完成：{ok_n}/{total} 条成功，回显已回注对话（AI 可基于回显继续分析）")
+        # 已执行的只读卡出队；写命令继续走下发
+        self._cards = [c for c in self._cards
+                       if not (c["checked"] and c["risk"] == "readonly")]
+        self._refresh_queue()
+        if write_lines:
+            self._do_send(device, password, write_lines)
+
+    def _append_device_echo(self, cmd, output):
+        """设备回显块：聊天区即时刻画 + 注入 AI 对话上下文（截断防上下文膨胀）"""
+        text = f"$ {cmd}\n{output or '(无回显)'}"
+        self.chat_view.append(self._device_block_html(text))
+        self._append_history("device", text[:1800])
+        self._auto_scroll()
+
+    def _device_block_html(self, text):
+        esc = _html.escape(text).replace("\n", "<br>")
+        return (f'<div style="color:{theme.t("text_sub")};font-size:11px;margin-top:2px;">设备回显</div>'
+                f'<div style="background:{theme.t("preview_bg")};border:1px solid '
+                f'{theme.t("preview_border")};border-radius:10px;padding:8px 12px;'
+                'margin:2px 0 6px 0;font-family:Consolas,monospace;font-size:12px;'
+                f'line-height:1.5;color:{theme.t("preview_text")};">{esc}</div>')
 
     def _do_send(self, device, password, cmd_lines):
         self._sys_line(f"正在下发 {len(cmd_lines)} 条命令到 {device.get('ip')}…")
@@ -1124,7 +1243,8 @@ class AIOpsTab(QWidget):
         else:
             self._sys_line(f"❌ 下发失败：{str(log)[:120]}")
             error_box(self, "下发失败", str(log)[:600])
-        self._cards = [c for c in self._cards if not c["checked"] or c["risk"] == "readonly"]
+        self._cards = [c for c in self._cards if not c["checked"]
+                       or c["risk"] == "readonly"]   # 只读卡可能未执行（混合批次只发了写）
         self._refresh_queue()
         self._auto_scroll()
 
@@ -1151,7 +1271,11 @@ class AIOpsTab(QWidget):
     def _batch_deploy(self):
         picks = [c for c in self._cards if c["checked"] and c["risk"] != "readonly"]
         if not picks:
-            warn_box(self, "提示", "请先在队列中勾选要执行的命令")
+            if any(c["checked"] for c in self._cards):
+                warn_box(self, "提示", "批量下发只下发「写配置」命令；"
+                                      "只读验证命令请选单台设备后用「确认执行」执行")
+            else:
+                warn_box(self, "提示", "请先在队列中勾选要下发的命令")
             return
         store = DeviceStore()
         candidates = [(d, bool(store.get_plain_password(d.get("id"))))
