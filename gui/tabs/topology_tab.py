@@ -622,6 +622,13 @@ class DeviceNode(QGraphicsObject):
             self.update()
             event.accept()
             return
+        # 单击 = 单选语义：清掉其余节点选中（全量点击测试实测——前一步遗留的
+        # 选中让"单击新节点"变成多选，侧板落到"未选择设备"，感知为点了没反应）
+        if event.button() == Qt.LeftButton:
+            scene = self.scene()
+            for item in scene.selectedItems():
+                if item is not self:
+                    item.setSelected(False)
         self._press_port = ""
         super().mousePressEvent(event)
 

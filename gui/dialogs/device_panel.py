@@ -476,9 +476,9 @@ class DevicePanelDialog(BaseDialog):
         QApplication.clipboard().setText(self._plain_cmds())
 
     def _apply_to_device(self):
-        """一键应用：命令填入 Console 原文 → 跳 Console 页 → deploy_to_device
-        （自带二次确认 + 下发 + 自动重采闭环）；确认下发后关闭面板（避免陈旧数据
-        误导，重采后重新打开即最新状态）；用户取消则面板保留可继续调整"""
+        """一键应用：先确认，用户同意后才填原文+跳页（取消零副作用——
+        全量点击测试实测：确认前就跳页/替换原文，用户点「否」后界面已被带走）；
+        Console 侧 deploy_to_device 自带最终确认 + 下发 + 自动重采闭环。"""
         if not self._lines:
             warn_box(self, "应用到设备", "还没有可应用的命令——请先选中端口并填好参数")
             return
@@ -487,9 +487,15 @@ class DevicePanelDialog(BaseDialog):
         if cv is None:
             warn_box(self, "应用到设备", "找不到 Console 页")
             return
+        from gui.dialogs.base import question_box
+        if not question_box(
+                self, "送到 Console 页",
+                f"将把 {len(self._lines)} 行命令填入 Console 页「配置原文」框（替换当前内容），"
+                "随后在该页点「下发到设备」确认后才写入设备。\n是否继续？"):
+            return                  # 取消：不跳页、不替换原文，面板保留可继续调整
         cv.raw_view.setPlainText(self._plain_cmds())
         self.page._goto("Console 可视化")
-        cv.deploy_to_device()          # 弹确认；用户取消则什么都不会发生
+        cv.deploy_to_device()          # 最终确认 + 下发 + 自动重采
         worker = getattr(cv, "_worker", None)
         if worker is not None and worker.isRunning():
             self.close()               # 已确认下发：面板即将被重采刷新，关掉避免陈旧误导

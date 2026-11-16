@@ -313,24 +313,24 @@ class AIOpsTab(QWidget):
         bar.addWidget(QLabel("目标设备:"))
         bar.addWidget(self.device_combo, 1)
 
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setFixedSize(34, 34)
-        refresh_btn.setToolTip("刷新设备清单")
-        refresh_btn.setCursor(Qt.PointingHandCursor)
-        refresh_btn.setStyleSheet(f"""
+        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn.setFixedSize(34, 34)
+        self.refresh_btn.setToolTip("刷新设备清单")
+        self.refresh_btn.setCursor(Qt.PointingHandCursor)
+        self.refresh_btn.setStyleSheet(f"""
             QPushButton {{ background: {CARD}; border: 1px solid {BORDER};
                 border-radius: 17px; font-size: 15px; color: {TEXT}; }}
             QPushButton:hover {{ border-color: {ACCENT}; color: {ACCENT}; }}
         """)
-        refresh_btn.clicked.connect(self._reload_devices)
-        bar.addWidget(refresh_btn)
+        self.refresh_btn.clicked.connect(self._reload_devices)
+        bar.addWidget(self.refresh_btn)
 
-        cfg_btn = QPushButton("⚙ AI 设置")
-        cfg_btn.setObjectName("ghostButton")
-        cfg_btn.setCursor(Qt.PointingHandCursor)
-        cfg_btn.setToolTip("配置模型服务商 / 地址 / Key（设置对话框 → AI 页）")
-        cfg_btn.clicked.connect(self._open_ai_settings)
-        bar.addWidget(cfg_btn)
+        self.cfg_btn = QPushButton("⚙ AI 设置")
+        self.cfg_btn.setObjectName("ghostButton")
+        self.cfg_btn.setCursor(Qt.PointingHandCursor)
+        self.cfg_btn.setToolTip("配置模型服务商 / 地址 / Key（设置对话框 → AI 页）")
+        self.cfg_btn.clicked.connect(self._open_ai_settings)
+        bar.addWidget(self.cfg_btn)
 
         self.attach_cb = QCheckBox("附加设备配置")
         self.attach_cb.setChecked(True)
@@ -515,6 +515,8 @@ class AIOpsTab(QWidget):
         self.status_label.setStyleSheet(f"color: {TEXT_SUB}; font-size: 12px;")
         lay.addWidget(self.status_label)
         self._sync_status()
+        # 初始空态同步（队列无内容时两个执行按钮都必须禁用）
+        self._sync_deploy_btn()
         self._render_welcome()
         # 主题切换时重绘聊天气泡：HTML 内联色不走 QSS 重映射，必须现取现刷
         theme.on_change(self._on_theme_changed)
@@ -1083,7 +1085,9 @@ class AIOpsTab(QWidget):
             self._refresh_queue()
 
     def _sync_deploy_btn(self):
-        """按勾选构成分档：纯验证 / 纯下发 / 混合执行（读写都有时先验证后下发）"""
+        """按勾选构成分档：纯验证 / 纯下发 / 混合执行（读写都有时先验证后下发）。
+        空态必须禁用（UI 全面巡检抓到的缺陷：构造后队列从未刷新，
+        _sync 不跑则两按钮启动即 enabled，空队列点击只靠警告弹窗兜底）"""
         checked = [c for c in self._cards if c["checked"]]
         n_r = sum(1 for c in checked if c["risk"] == "readonly")
         n_w = len(checked) - n_r
@@ -1096,6 +1100,7 @@ class AIOpsTab(QWidget):
         else:
             self.deploy_btn.setText("确认执行")
         self.deploy_btn.setEnabled(bool(checked))
+        self.batch_btn.setEnabled(bool(checked))
 
     # ---------------------------------------------------------------- 执行（人工确认闸门：只读验证 + 配置下发分流）
     def _deploy(self):
