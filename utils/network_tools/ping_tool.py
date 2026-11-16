@@ -14,6 +14,19 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 class PingTool:
     """Ping测试工具"""
+
+    # 活跃 ping 子进程注册表：停止按钮不再 QThread.terminate()（实测 0xC0000409
+    # 强杀持有 subprocess 的线程 → 原生崩溃），改为 kill 子进程让线程自然收尾
+    _active_processes = []
+
+    @staticmethod
+    def stop_all():
+        """请求停止：kill 全部活跃 ping 子进程（communicate 立即返回，线程自然结束）"""
+        for p in list(PingTool._active_processes):
+            try:
+                p.kill()
+            except Exception:
+                pass
     
     @staticmethod
     def ping(host: str, count: int = 4, timeout: int = 2) -> Dict:
@@ -75,8 +88,18 @@ class PingTool:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-            
-            output_bytes, error_bytes = process.communicate(timeout=count * timeout + 10)
+            PingTool._active_processes.append(process)
+            try:
+                output_bytes, error_bytes = process.communicate(timeout=count * timeout + 10)
+            finally:
+                try:
+                    PingTool._active_processes.remove(process)
+                except ValueError:
+                    pass
+            # 被 stop_all kill 的进程：无输出且非零退出 → 如实标记为已取消
+            if process.returncode != 0 and not (output_bytes or b"").strip():
+                result["error"] = "已停止"
+                return result
             output = output_bytes.decode(encoding, errors='ignore')
             error = error_bytes.decode(encoding, errors='ignore')
             

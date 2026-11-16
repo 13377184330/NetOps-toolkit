@@ -5,6 +5,7 @@
 """
 
 import socket
+import threading
 import concurrent.futures
 import errno
 from typing import Dict, List, Optional, Tuple
@@ -13,6 +14,18 @@ from datetime import datetime
 
 class PortScanner:
     """端口扫描工具"""
+
+    # 协作式停止：不再 QThread.terminate()（强杀持有 socket/exec 的线程实测
+    # 0xC0000409 原生崩溃）；stop_all() 置标志，扫描循环在下个完成回调后收尾
+    _stop_event = threading.Event()
+
+    @staticmethod
+    def stop_all():
+        PortScanner._stop_event.set()
+
+    @staticmethod
+    def reset_stop():
+        PortScanner._stop_event.clear()
     
     COMMON_PORTS = {
         21: "FTP",
@@ -149,6 +162,7 @@ class PortScanner:
             filtered_count = 0
             completed = 0
             total = len(ports)
+            PortScanner.reset_stop()   # 新一轮扫描清除旧停止标志
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_port = {
@@ -157,6 +171,13 @@ class PortScanner:
                 }
                 
                 for future in concurrent.futures.as_completed(future_to_port):
+                    if PortScanner._stop_event.is_set():
+                        # 用户请求停止：取消未开始的任务，收尾返回已扫部分
+                        for f in future_to_port:
+                            f.cancel()
+                        result["error"] = "已停止"
+                        result["total_ports"] = completed
+                        break
                     try:
                         port_result = future.result()
                         completed += 1

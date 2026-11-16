@@ -12,6 +12,17 @@ from typing import Dict, List, Optional
 
 
 class TraceRoute:
+    # 活跃 tracert/traceroute 子进程注册表：停止按钮不再 QThread.terminate()
+    # （强杀持有 subprocess 的线程实测 0xC0000409 原生崩溃），改 kill 子进程自然收尾
+    _active_processes = []
+
+    @staticmethod
+    def stop_all():
+        for p in list(TraceRoute._active_processes):
+            try:
+                p.kill()
+            except Exception:
+                pass
     """路由跟踪工具"""
     
     @staticmethod
@@ -94,7 +105,14 @@ class TraceRoute:
                 stderr=subprocess.PIPE,
                 creationflags=subprocess.CREATE_NO_WINDOW
             )
-            output_bytes, _ = process.communicate(timeout=max_hops * timeout * 3)
+            TraceRoute._active_processes.append(process)
+            try:
+                output_bytes, _ = process.communicate(timeout=max_hops * timeout * 3)
+            finally:
+                try:
+                    TraceRoute._active_processes.remove(process)
+                except ValueError:
+                    pass
             return output_bytes.decode('gbk', errors='ignore')
         except subprocess.TimeoutExpired:
             return ""
@@ -113,7 +131,14 @@ class TraceRoute:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
-                output, _ = process.communicate(timeout=max_hops * timeout * 3)
+                TraceRoute._active_processes.append(process)
+                try:
+                    output, _ = process.communicate(timeout=max_hops * timeout * 3)
+                finally:
+                    try:
+                        TraceRoute._active_processes.remove(process)
+                    except ValueError:
+                        pass
                 return output.decode('utf-8', errors='ignore')
             except FileNotFoundError:
                 continue
@@ -223,7 +248,14 @@ class TraceRoute:
                         stderr=subprocess.PIPE,
                         creationflags=subprocess.CREATE_NO_WINDOW if is_windows else 0
                     )
-                    output, _ = process.communicate(timeout=timeout + 5)
+                    TraceRoute._active_processes.append(process)
+                    try:
+                        output, _ = process.communicate(timeout=timeout + 5)
+                    finally:
+                        try:
+                            TraceRoute._active_processes.remove(process)
+                        except ValueError:
+                            pass
                     output = output.decode(encoding, errors='ignore')
                     
                     ip_match = re.search(r'来自\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', output)

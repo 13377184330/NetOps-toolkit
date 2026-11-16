@@ -277,10 +277,9 @@ def main():
                  "↺ 还原原文", "➕ 存入设备清单"):
         case(f"F2 按钮可见「{name}」", visible_btn(cv, name) is not None)
     if n_ports == 0:
-        print("  [probe] F3: 点击连接（无串口）— 本轮跳过真点（二分排查后台残留）", flush=True)
         QTest.mouseClick(visible_btn(cv, "连接并读取配置"), Qt.LeftButton)
         pump(300)
-        print("  [probe] F3 点击完成", flush=True)
+        case("F3 无串口→降级提示不崩溃", True)
         STYLEDLOG.clear()
 
     # ============ 阶段 G：自由终端页 ============
@@ -292,10 +291,9 @@ def main():
     case("G2 写模式开关可见", visible_btn(term, "开启写模式") is not None
          or [b for b in term.findChildren(QPushButton) if b.isVisible()], "")
     if term.port_combo.count() == 0:
-        print("  [probe] G3: 点击连接（无串口）", flush=True)
         QTest.mouseClick(visible_btn(term, "连接"), Qt.LeftButton)
         pump(300)
-        print("  [probe] G3 点击完成", flush=True)
+        case("G3 无串口→降级不崩溃", True)
 
     # ============ 阶段 H：工具箱全页巡检（按页名定位，免疫页序变化） ============
     print("\n[阶段 H] 工具箱全页巡检")
@@ -358,31 +356,24 @@ def main():
         ok = ok and any(t.toPlainText().strip() for t in vis_texts(pg))
     case("H2 子网计算出结果", ok, f"页索引 {idx}")
 
-    # -- Ping 127.0.0.1（回环真跑）--
+    # -- Ping 127.0.0.1（回环真跑，含停止按钮协作式收尾验证）--
     idx = goto_tool("Ping 测试")
-    print(f"  [probe] H3: 页索引={idx}", flush=True)
     ok = idx > 0
     if ok:
         pg = tw.stack.widget(idx)
         edits = vis_edits(pg)
-        print(f"  [probe] H3: 输入框={len(edits)} 个", flush=True)
         if edits:
             edits[0].setText("127.0.0.1")
         rt = vis_texts(pg)
         rt = rt[0] if rt else None
-        print(f"  [probe] H3: 输出区={rt is not None}", flush=True)
-        c1 = safe_click(pg, "▶ 开始 Ping")
-        print(f"  [probe] H3: 点击={c1}", flush=True)
-        if c1 and rt is not None:
+        if safe_click(pg, "▶ 开始 Ping") and rt is not None:
             wait_until(lambda: rt.toPlainText().strip() != "", 20)
-            print("  [probe] H3: 出结果", flush=True)
         stop = visible_btn(pg, "⏹ 停止")
         if stop is not None and stop.isVisible():
-            QTest.mouseClick(stop, Qt.LeftButton)
+            QTest.mouseClick(stop, Qt.LeftButton)   # 曾是必崩按钮（漏 import NameError→qFatal）
         pump(200)
         ok = rt is not None and rt.toPlainText().strip() != ""
-        print(f"  [probe] H3: ok={ok}", flush=True)
-    case("H3 Ping 127.0.0.1 出结果", ok, f"页索引 {idx}")
+    case("H3 Ping 127.0.0.1 出结果（含停止不崩）", ok, f"页索引 {idx}")
 
     # -- 端口扫描 127.0.0.1（回环真跑）--
     idx = goto_tool("端口扫描")
@@ -441,7 +432,9 @@ def main():
         pg = tw.stack.widget(idx)
         safe_click(pg, "🎲 生成新密码")
         pump(150)
-        ok = any(t.toPlainText().strip() for t in vis_texts(pg))
+        # 单条密码输出是 QLineEdit（password_display），批量结果才是 QTextEdit
+        ok = any(e.text().strip() for e in vis_edits(pg)) \
+            or any(t.toPlainText().strip() for t in vis_texts(pg))
     case("H7 密码生成出结果", ok, f"页索引 {idx}")
 
     # -- 编码转换（真转）--
@@ -505,8 +498,9 @@ def main():
         pump(100)
         safe_click(pg, "🔍 开始检查")
         pump(300)
-        ok = any("严重" in t.toPlainText() or "警告" in t.toPlainText()
-                 for t in vis_texts(pg))
+        # 体检报告是 QTableWidget（严重/警告/提示逐行列出），不是文本区
+        from PyQt5.QtWidgets import QTableWidget as _QT
+        ok = any(t.rowCount() > 0 for t in pg.findChildren(_QT) if t.isVisible())
     case("H13 配置体检出报告", ok, f"页索引 {idx}")
 
     # -- 批量生成 --

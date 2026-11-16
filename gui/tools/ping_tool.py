@@ -20,6 +20,7 @@ from gui.tool_styles import (
     TOOL_LABEL_STYLE, TOOL_LABEL_SECONDARY,
     TOOL_BUTTON_PRIMARY, TOOL_BUTTON_DANGER, TOOL_BUTTON_GHOST,
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR, TOOL_STATUS_INFO,
+    TOOL_STATUS_WARNING,   # 停止槽用到——原版漏 import，点「⏹ 停止」NameError → qFatal 应用闪退
     RESULT_HEADER, RESULT_FOOTER,
     apply_tool_style
 )
@@ -292,9 +293,10 @@ class PingTestWidget(QWidget):
         self.stop_btn.setEnabled(False)
     
     def stop_ping(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-            self.status_bar.setStyleSheet(TOOL_STATUS_WARNING)
-            self.status_bar.setText("⚠️ 已停止测试")
-        self.on_ping_finished()
+        # 协作式停止：kill 子进程让线程自然收尾（原 QThread.terminate 实测
+        # 0xC0000409 原生崩溃——强杀持有 subprocess 的线程是 Qt 文档明禁的不可预测行为）
+        PingTool.stop_all()
+        self.status_bar.setStyleSheet(TOOL_STATUS_WARNING)
+        self.status_bar.setText("⚠️ 已请求停止，等待当前 ping 进程收尾…")
+        if not (self.worker and self.worker.isRunning()):
+            self.on_ping_finished()

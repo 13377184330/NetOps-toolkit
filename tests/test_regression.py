@@ -65,4 +65,13 @@ _theme.set_theme("light", app)
 app.processEvents()
 print("[5] AI 页双主题切换重绘无崩溃")
 
+# 显式收尾：脚本自然结束时局部 win/app 被 GC 析构顺序不可控，
+# 实测 0xC0000005 退出崩溃（断言全过但退出码非 0，跑批器误判 FAIL）
+win.close()
+tw.close()
+app.processEvents()
+win.deleteLater()
+tw.deleteLater()
+app.processEvents()
+
 print("\n=== v4.1 回归冒烟全部通过 ===")

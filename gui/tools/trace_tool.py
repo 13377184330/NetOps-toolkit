@@ -217,13 +217,13 @@ class TraceRouteWidget(QWidget):
         self.stop_btn.setEnabled(False)
     
     def stop_trace(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-        
-        self.on_trace_finished()
+        # 协作式停止：kill tracert 子进程让线程自然收尾（原 QThread.terminate
+        # 实测 0xC0000409 原生崩溃——强杀持有 subprocess 的线程是 Qt 文档明禁行为）
+        TraceRoute.stop_all()
         self.status_label.setStyleSheet(TOOL_STATUS_WARNING)
-        self.status_label.setText("⚠️ 已取消追踪")
+        self.status_label.setText("⚠️ 已请求停止，等待当前跳收尾…")
+        if not (self.worker and self.worker.isRunning()):
+            self.on_trace_finished()
     
     def toggle_raw_output(self):
         if self.raw_output.isVisible():

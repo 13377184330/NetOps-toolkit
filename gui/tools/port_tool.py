@@ -429,12 +429,13 @@ class PortScanWidget(QWidget):
         self.stop_btn.setEnabled(False)
     
     def stop_scan(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-            self.stats_label.setStyleSheet(TOOL_STATUS_WARNING)
-            self.stats_label.setText("⚠️ 扫描已停止")
-        self.on_scan_finished()
+        # 协作式停止：置标志取消未开始任务（原 QThread.terminate 实测 0xC0000409
+        # 原生崩溃——强杀持有 socket 的线程是 Qt 文档明禁的不可预测行为）
+        PortScanner.stop_all()
+        self.stats_label.setStyleSheet(TOOL_STATUS_WARNING)
+        self.stats_label.setText("⚠️ 已请求停止，等待收尾…")
+        if not (self.worker and self.worker.isRunning()):
+            self.on_scan_finished()
     
     def quick_test(self):
         host = self.quick_host.text().strip()
