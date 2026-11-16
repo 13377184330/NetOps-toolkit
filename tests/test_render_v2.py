@@ -44,11 +44,11 @@ html = _render_ai_content(reply)
 assert html.count("&nbsp;#&nbsp;") == 6, f"注释分层样式数 {html.count('&nbsp;#&nbsp;')} != 6"
 # 高危红行
 assert "undo stp enable" in html
-# 缩进：interface 后的子命令应有全角空格缩进
+# 缩进：interface 后的子命令应有 margin-left 结构化缩进
+# （真机用户实测教训：全角/半角空格缩进会被 QTextBrowser 空白折叠吞掉，
+#   函数层 HTML 正确 ≠ 显示层正确——必须同时验渲染后文档层）
 import re as _re
-# 找到 port link-type access 那行
-m = _re.search(r"<div[^>]*>(.*?)port link-type access", html)
-assert m and "　" in m.group(1), "interface 子命令应有视图缩进"
-print("PASS: 注释分层 6 处 / 高危保留 / 子命令缩进")
-ctx = m.group(1)
-print(f"  port link-type access 行前缩进: {ctx!r}")
+m = _re.search(r'<div style="color:[^"]*;margin-left:(\d+)px;">\s*port link-type access', html)
+assert m and int(m.group(1)) >= 14, f"interface 子命令应有 ≥1 级 margin 缩进，实际 {m.group(0)[:60] if m else '未匹配'}"
+print("PASS: 注释分层 6 处 / 高危保留 / 子命令 margin 缩进")
+print(f"  port link-type access 缩进: margin-left:{m.group(1)}px")

@@ -1266,17 +1266,18 @@ def _render_ai_content(text: str) -> str:
             delta = _line_indent_level(cmd)
             if delta < 0:
                 depth = max(0, depth - 1)
-                indent = "　" * depth
-            else:
-                indent = "　" * depth
-                depth = max(0, depth + delta)
+            this_depth = depth
+            depth = max(0, depth + max(0, delta))
             risk = ai_ops.classify_command(cmd)
             color = theme.t("danger") if risk == "dangerous" else theme.t("preview_text")
             note_html = (f'<span style="color:{theme.t("preview_ph")};opacity:0.85;">'
                          f'&nbsp;#&nbsp;{_html.escape(note)}</span>' if note else "")
+            # 缩进用 CSS margin-left（结构化缩进）——全角/半角空格都会被
+            # QTextBrowser 的 HTML 空白折叠吞掉（真机用户实测：函数层 HTML 正确、
+            # 显示层缩进全丢，测试必须验渲染后文档而非函数输出）
             lines_html.append(
-                f'<div style="color:{color};white-space:nowrap;">'
-                f'{indent}{_html.escape(cmd)}{note_html}</div>')
+                f'<div style="color:{color};margin-left:{this_depth * 14}px;">'
+                f'{_html.escape(cmd)}{note_html}</div>')
         out.append(
             f'<div style="background:{theme.t("preview_bg")};border:1px solid '
             f'{theme.t("preview_border")};border-radius:10px;padding:10px 12px;'
