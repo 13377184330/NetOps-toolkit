@@ -22,7 +22,7 @@ Qt 原生图形框架实现，不重复造绘图轮子
 import math
 import re
 
-from PyQt5.QtCore import QEvent, QPointF, QRectF, Qt, QTimer
+from PyQt5.QtCore import QEvent, QPointF, QRectF, Qt, QTimer, QThread, pyqtSignal
 from PyQt5.QtGui import (QBrush, QColor, QFont, QFontMetrics, QPainter,
                           QPainterPath, QPen, QMouseEvent)
 from PyQt5.QtWidgets import (QApplication, QAbstractItemView, QCheckBox, QComboBox,
@@ -1142,6 +1142,26 @@ class AddDeviceDialog(BaseDialog):
 
 
 # ---------------------------------------------------------------- 主页面
+class _LiveRefreshWorker(QThread):
+    """拓扑实时刷新的串口轮询线程（模块级——QThread 局部类是已知生命周期雷）"""
+    done = pyqtSignal(bool, dict)
+
+    def __init__(self, port, vkey, parent=None):
+        super().__init__(parent)
+        self._port = port
+        self._vkey = vkey
+
+    def run(self):
+        from modules import console_reader as cr
+        try:
+            with cr.ConsoleReader(self._port, 9600) as rd:
+                rd.vendor = self._vkey
+                link = rd.read_link_state()
+                self.done.emit(True, link)
+        except Exception:
+            self.done.emit(False, {})
+
+
 class NetworkTopologyPage(QWidget):
     """网络拓扑（可视化运维入口）"""
 
@@ -1488,19 +1508,7 @@ class NetworkTopologyPage(QWidget):
         cn2key = {"华为": "huawei", "H3C": "h3c", "锐捷": "ruijie", "迈普": "maipu", "思科": "cisco"}
         vkey = cn2key.get(vendor) or vendor or "h3c"
         self._live_busy = True
-
-        class _LiveWorker(QThread):
-            done = pyqtSignal(bool, dict)
-
-            def run(self):
-                from modules import console_reader as cr
-                try:
-                    with cr.ConsoleReader(port, 9600) as rd:
-                        rd.vendor = vkey
-                        link = rd.read_link_state()
-                        self.done.emit(True, link)
-                except Exception:
-                    self.done.emit(False, {})
+        self._live_worker = _LiveRefreshWorker(port, vkey)
 
         def _on_live(ok, link):
             self._live_busy = False
@@ -1509,23 +1517,25 @@ class NetworkTopologyPage(QWidget):
             old = self._data.get("link_up") or {}
             changed = {k: v for k, v in link.items() if old.get(k) != v}
             self._data["link_up"] = link
+            sw = self._sw_node
             if changed:
-                # 只重画端口面板（保留节点位置）；重画走 load 的局部刷新太重，
-                # 直接更新交换机节点的端口状态灯
-                sw = self._sw_node
+                # 端口状态灯变色：paint 现读 p['state']，直接 update 即可。
+                # ⚠严禁在此调 _compute_panel()——它会改 _w/_panel 几何而未声明
+                # prepareGeometryChange，QGraphicsScene BSP 索引损坏 → 0xC0000409
+                # fastfail（真机实测：状态变化非空时必崩；几何本来就没变，重算纯属多余）
                 if sw is not None and getattr(sw, "_ports", None):
                     for p in sw._ports:
                         name = p["name"]
                         if name in link or name in old:
                             p["state"] = _port_state({"name": name}, link)
-                    sw._compute_panel()
                     sw.update()
-                ups = sum(1 for v in link.values() if v)
-                self._sys_live_note(f"端口状态已刷新：UP {ups} 口"
-                                    + (f"，变化 {len(changed)} 口" if changed else ""))
+            # 每轮成功都提示（无变化也说"无变化"）——轮询活着与否用户可感知
+            ups = sum(1 for v in link.values() if v)
+            self._sys_live_note(f"端口状态已刷新：UP {ups} 口 · "
+                                + (f"变化 {len(changed)} 口" if changed else "无变化"))
+            if changed:
                 self._refresh_legend()
 
-        self._live_worker = _LiveWorker()
         self._live_worker.done.connect(_on_live)
         self._live_worker.start()
 

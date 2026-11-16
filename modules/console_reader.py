@@ -147,9 +147,12 @@ def read_until_idle(ser: serial.Serial, idle_sec: float = 2.0, max_wait: float =
                 last_report = time.time()
         else:
             idle += 0.2
-            # 检查 More 翻页标记（仅从最后 100 字节检查，避免大数据中多次扫描）
+            # More 翻页检测：必须基于【全量累积缓冲】的尾部匹配——
+            # 真机实测（H3C）：More 提示是逐字符到达（每字符一块），按 chunks[-2:]
+            # 块级取尾只得到 '--' 两字节，完整 '---- More ----' 永远不命中 →
+            # 不翻页 → 每屏 24 行稳定截断（297 字符）。拼接后取尾恢复原版语义。
             if total_size > 0:
-                tail = b"".join(chunks[-2:])[-100:] if len(chunks) > 0 else b""
+                tail = b"".join(chunks)[-100:]
                 if b"---- More ----" in tail:
                     ser.write(b" ")
                     time.sleep(0.25)
