@@ -73,12 +73,14 @@ class IPAMWidget(QWidget):
         self.subnet_combo = QComboBox()
         self.subnet_combo.setMinimumWidth(180)
         self.ip_edit = QLineEdit()
-        self.ip_edit.setPlaceholderText("留空 = 自动建议下一个可用")
-        self.ip_edit.setToolTip("IP（留空 = 自动建议该网段下一个可用地址）")
+        # 保留「IP」关键词（控件定位/可读性），(留空=自动建议) 语义仍完整且不超宽
+        self.ip_edit.setPlaceholderText("IP（留空 = 自动建议可用）")
+        self.ip_edit.setToolTip("留空时自动建议该网段下一个可用地址")
         self.ip_edit.setMinimumWidth(170)
         self.note_edit = QLineEdit()
-        self.note_edit.setPlaceholderText("备注（如：SW-01 管理口）")
-        self.note_edit.setMinimumWidth(170)
+        # 保留「用途备注」关键词（同上）；示例收短避免挤压
+        self.note_edit.setPlaceholderText("用途备注（SW-01 管理口）")
+        self.note_edit.setMinimumWidth(190)
         self.mark_btn = QPushButton("标记已用")
         self.mark_btn.setObjectName("secondaryButton")
         self.mark_btn.clicked.connect(self._mark)
