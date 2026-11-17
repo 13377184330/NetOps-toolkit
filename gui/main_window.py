@@ -15,7 +15,7 @@ from PyQt5.QtCore import Qt, QEvent, QObject
 from PyQt5.QtGui import QPainter, QColor, QCursor, QGuiApplication, QPalette
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE
-from gui.dialogs.base import BaseDialog, info_box, warn_box, error_box, question_box
+from gui.dialogs.base import BaseDialog, info_box, warn_box, error_box, question_box, input_box
 from gui import theme
 from gui.title_bar import FramelessTitleBar
 from gui.side_nav import _SideNavWidget
@@ -1059,6 +1059,12 @@ class MainWindow(QMainWindow):
         
         if self.current_device_type == "h3c":
             full_config = full_config.replace("Vlanif", "Vlan-interface")
+            # 华为生成器基底 → Comware 差异命令映射（NetCMD 校准集实锤：
+            # 华三 DAI 为 vlan 视图 arp detection enable，无 arp anti-attack 体系；
+            # 信任口命令为 dhcp snooping trust，非华为的 trusted）
+            full_config = full_config.replace(
+                "arp anti-attack check user-bind enable", "arp detection enable")
+            full_config = full_config.replace("dhcp snooping trusted", "dhcp snooping trust")
         
         self._clean_config = header + full_config
         self._render_preview()
@@ -1190,9 +1196,8 @@ class MainWindow(QMainWindow):
     
     def export_current_template(self):
         from utils.template_manager import TemplateManager
-        from PyQt5.QtWidgets import QInputDialog
-        
-        name, ok = QInputDialog.getText(self, "导出模板", "请输入模板名称:")
+        name, ok = input_box(self, "导出模板", "模板名称",
+                             placeholder="如：核心交换机-标准配置")
         if not ok or not name:
             return
         

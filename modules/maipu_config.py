@@ -387,31 +387,35 @@ class MaipuSecurityGenerator:
 
     @staticmethod
     def generate_dhcp_snooping(enable=True, trusted_ports=None, vlan=None):
-        """IOS 家族通用语法；迈普各型号细节请以设备手册核对后下发"""
+        """迈普 DHCP Snooping（NetCMD 校准集实锤，标注迈普官方）：
+        全局 dhcp-snooping（连字符、无 enable），接口下 dhcp-snooping trust；
+        无 IOS 式 ip dhcp snooping vlan 子命令，按端口/接口维度启用"""
         if not enable:
-            return "no ip dhcp snooping\n!"
-        lines = ["ip dhcp snooping"]
+            return "no dhcp-snooping\n!"
+        lines = ["dhcp-snooping"]
         if vlan:
-            lines.append(f"ip dhcp snooping vlan {vlan}")
+            lines.append(f"# 注：迈普按端口维度启用，无 vlan 子命令；本例规划 VLAN {vlan}")
         for port in trusted_ports or []:
             lines.append(f"interface {port}")
-            lines.append(" ip dhcp snooping trust")
+            lines.append(" dhcp-snooping trust")
         lines.append("!")
         return "\n".join(lines)
 
     @staticmethod
     def generate_arp_inspection(vlans=None, trusted_ports=None):
-        """IOS 家族通用语法；迈普各型号细节请以设备手册核对后下发"""
-        lines = []
+        """迈普 ARP 防护（NetCMD 校准集实锤，标注迈普官方）：接口级 arp-check 体系，
+        非 IOS ip arp inspection——用户口 arp-check enable + arp-check binding，
+        上联/信任口不配置即为信任；不生成伪命令，输出配置指引"""
+        lines = [
+            "# 迈普 ARP 防护为接口级 arp-check（非 ip arp inspection）：",
+            "#   用户口：interface <port> 后 arp-check enable + arp-check binding <MAC> <IP>",
+            "#   上联/信任口：不配置 arp-check 即为信任",
+        ]
+        if trusted_ports:
+            lines.append(f"# 本次信任口（无需配置）: {', '.join(map(str, trusted_ports))}")
         if vlans:
-            lines.append(f"ip arp inspection vlan {' '.join(map(str, vlans))}")
-        for port in trusted_ports or []:
-            lines.append(f"interface {port}")
-            lines.append(" ip arp inspection trust")
-        if lines:
-            lines.append("!")
-            return "\n".join(lines)
-        return ""
+            lines.append(f"# VLAN 维度（{', '.join(map(str, vlans))}）仅锐捷/思科 DAI 适用，迈普按接口逐口开启")
+        return "\n".join(lines)
 
     @staticmethod
     def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
@@ -434,15 +438,18 @@ class MaipuInterfaceGenerator:
     @staticmethod
     def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None,
                            trunk_vlans=None):
-        """迈普链路聚合（五厂商对照实锤）：聚合组在全局定义，成员口用 link-aggregation 引用。
-        mode: lacp（默认，LACP 协商）| manual（手动静态聚合）"""
+        """迈普链路聚合（NetCMD 校准集实锤，HiOS 主线多平台核验）：
+        聚合组全局定义 link-aggregation N mode lacp|manual，成员口 link-aggregation N mode lacp|manual
+        （成员口用 mode lacp，不分 active/passive）；
+        S3000 等 ROS 老平台为 port-group N mode active|on 语法（见校准摘录）"""
         lines = []
         if mode in ("lacp", "lacp-static", "lacp-dynamic"):
             lines.append(f"link-aggregation {trunk_id} mode lacp")
-            member_cmd = f"link-aggregation {trunk_id} active"
+            member_cmd = f"link-aggregation {trunk_id} mode lacp"
         else:
             lines.append(f"link-aggregation {trunk_id} mode manual")
-            member_cmd = f"link-aggregation {trunk_id} manual"
+            member_cmd = f"link-aggregation {trunk_id} mode manual"
+        lines.append("# 注：S3000 等 ROS 老平台为 port-group {0} mode active|on（全局+成员口）".format(trunk_id))
         lines.append("!")
         if members:
             for member in members:
@@ -597,12 +604,10 @@ def generate_security_all(config: dict) -> str:
             tf["interface"], tf["acl_number"], tf.get("direction", "in")))
     if "dhcp_snooping" in config:
         ds = config["dhcp_snooping"]
-        parts.append("# 迈普 DHCP Snooping 为 IOS 家族写法，请以设备型号手册核对后下发")
         parts.append(MaipuSecurityGenerator.generate_dhcp_snooping(
             ds.get("enable", True), ds.get("trusted_ports"), ds.get("vlan")))
     if "arp_inspection" in config:
         ai = config["arp_inspection"]
-        parts.append("# 迈普 ARP 检测为 IOS 家族写法，请以设备型号手册核对后下发")
         parts.append(MaipuSecurityGenerator.generate_arp_inspection(
             ai.get("vlans"), ai.get("trusted_ports")))
     for st in config.get("storm_controls", []):

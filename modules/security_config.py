@@ -233,12 +233,17 @@ class SecurityConfigGenerator:
     def generate_dhcp_snooping(enable: bool = True,
                                trusted_ports: list = None,
                                vlan: int = None) -> str:
-        """生成DHCP Snooping配置"""
+        """生成DHCP Snooping配置（华为侧按 NetCMD 校准集修正：
+        先 dhcp enable 前置（手册要求），VLAN 内开启需进 VLAN 视图，
+        华为无全局 dhcp snooping vlan 命令）"""
         config_lines = []
+        config_lines.append("dhcp enable\n")
         config_lines.append("dhcp snooping enable\n")
         
         if vlan:
-            config_lines.append(f"dhcp snooping vlan {vlan}\n")
+            config_lines.append(f"vlan {vlan}\n")
+            config_lines.append(" dhcp snooping enable\n")
+            config_lines.append("#\n")
         
         if trusted_ports:
             for port in trusted_ports:
@@ -251,17 +256,20 @@ class SecurityConfigGenerator:
     @staticmethod
     def generate_arp_inspection(vlans: list = None,
                                trusted_ports: list = None) -> str:
-        """生成ARP防护配置"""
+        """生成ARP防护配置（华为侧按 NetCMD 校准集修正：
+        华为 DAI 为 VLAN/接口视图 arp anti-attack check user-bind enable，
+        无 arp inspection 全局命令；信任口不配置校验即为放行）"""
         config_lines = []
         
         if vlans:
-            config_lines.append(f"arp inspection vlan {' '.join(map(str, vlans))}\n")
+            for vid in vlans:
+                config_lines.append(f"vlan {vid}\n")
+                config_lines.append(" arp anti-attack check user-bind enable\n")
+                config_lines.append("#\n")
         
         if trusted_ports:
             for port in trusted_ports:
-                config_lines.append(f"interface {port}\n")
-                config_lines.append(" arp inspection trust\n")
-                config_lines.append("#\n")
+                config_lines.append(f"# 信任口 {port}：不配置绑定校验即为放行\n")
         
         return "".join(config_lines)
     

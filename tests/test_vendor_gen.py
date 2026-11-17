@@ -76,15 +76,15 @@ case("T0 找到「生成配置」按钮", gen_btn is not None)
 # 以及接口VLAN/VLANIF/静态路由/DHCP Snooping 的厂商化语法关键词
 EXPECT = {
     0: dict(vendor="huawei",  name="华为",  host="sysname SW-TEST",    vlan_kw="vlan 10",  ifname="Vlanif1",         iface_default="Vlanif1",         header="华为交换机配置脚本",
-            iface_kw="port link-type access", vlanif_kw="interface Vlanif10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable"),
+            iface_kw="port link-type access", vlanif_kw="interface Vlanif10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable", arp_kw="arp anti-attack check user-bind enable"),
     1: dict(vendor="h3c",     name="H3C",   host="sysname SW-TEST",    vlan_kw="Vlan-interface", ifname="Vlan-interface1", iface_default="Vlan-interface1", header="H3C华三交换机配置脚本",
-            iface_kw="port link-type access", vlanif_kw="interface Vlan-interface10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable"),
+            iface_kw="port link-type access", vlanif_kw="interface Vlan-interface10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable", arp_kw="arp detection enable"),
     2: dict(vendor="ruijie",  name="锐捷",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="interface VLAN 1\n ip address 192.168.1.10", iface_default="VLAN 1",          header="锐捷交换机配置脚本",
-            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping", arp_kw="ip arp inspection vlan 10"),
     3: dict(vendor="maipu",   name="迈普",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="Vlan1",            iface_default="Vlan1",            header="迈普交换机配置脚本",
-            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp-snooping", arp_kw="arp-check enable"),
     4: dict(vendor="cisco",   name="思科",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="interface vlan 1\n ip address 192.168.1.10", iface_default="vlan 1",            header="思科交换机配置脚本",
-            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping", arp_kw="ip arp inspection vlan 10"),
 }
 
 def _click_btn(widget, text):
@@ -134,6 +134,7 @@ for idx, exp in EXPECT.items():
     sec = win.tabs["security"]
     if not sec.dhcp_snoop_enable.isChecked():
         sec.dhcp_snoop_enable.setChecked(True)
+    sec.arp_inspect_vlans.setText("10")
     app.processEvents()
     gen_btn.click()
     app.processEvents()
@@ -167,6 +168,8 @@ for idx, exp in EXPECT.items():
              "" if exp["route_kw"] in out else f"期望「{exp['route_kw']}」未命中")
         case(f"{v}10 DHCP Snooping语法符合{nm}", exp["ds_kw"] in out,
              "" if exp["ds_kw"] in out else f"期望「{exp['ds_kw']}」未命中")
+        case(f"{v}11 ARP检测语法符合{nm}", exp["arp_kw"] in out,
+             "" if exp["arp_kw"] in out else f"期望「{exp['arp_kw']}」未命中")
 
 n_pass = sum(1 for _, ok, _ in results if ok)
 print("\n" + "=" * 68)
