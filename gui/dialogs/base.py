@@ -26,7 +26,8 @@ info_box/warn_box/error_box/question_box）签名与语义保持 v1 不变。
 from PyQt5.QtCore import QPoint, QRect, Qt
 from PyQt5.QtGui import QColor, QPainter
 from PyQt5.QtWidgets import (QApplication, QDialog, QHBoxLayout, QLabel,
-                              QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                              QLineEdit, QPushButton, QScrollArea,
+                              QVBoxLayout, QWidget)
 
 from gui.styles import MODERN_STYLE, TOOLTIP_STYLE, DIALOG_STYLE
 from gui.title_bar import DotButton
@@ -464,3 +465,39 @@ def question_box(parent, title, text, ok="确定", cancel="取消", default="can
     clicked = _styled_box(parent, "question", title, text,
                            [(ok, "yes"), (cancel, "no")], default)
     return clicked is not None and clicked == ok
+
+
+def input_box(parent, title, label, text="", placeholder=None, subtitle=""):
+    """统一风格的单行输入框（替代原生 QInputDialog.getText）。
+
+    全量巡检真机截图实锤：原生 QInputDialog 是系统灰底直角窗 + Windows
+    默认按钮，与应用「无边框圆角 + 红点标题栏 + 语义色按钮」完全割裂。
+    返回 (text, True)=点了确定；(原样 text, False)=点了取消/关闭。"""
+    dlg = BaseDialog(title, subtitle, parent, min_width=440)
+    result = {"text": text, "ok": False}
+
+    row = QHBoxLayout()
+    row.setSpacing(10)
+    lab = QLabel(label)
+    edit = QLineEdit()
+    edit.setText(text)
+    if placeholder:
+        edit.setPlaceholderText(placeholder)
+    edit.setMinimumHeight(40)
+    edit.setMinimumWidth(240)
+    edit.selectAll()
+    row.addWidget(lab)
+    row.addWidget(edit, 1)
+    dlg.content_layout().addLayout(row)
+
+    def _pick():
+        result["text"] = edit.text()
+        result["ok"] = True
+
+    dlg.add_close_button("取消", "ghost")
+    ok_btn = dlg.add_button("确定", "primary", _pick)
+    ok_btn.setDefault(True)
+    edit.returnPressed.connect(ok_btn.click)
+    ok_btn.setFocus()
+    dlg.exec_()
+    return result["text"], result["ok"]

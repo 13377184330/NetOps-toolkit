@@ -74,6 +74,12 @@ def patch_app_dialogs():
         return buttons[0][0]
     db._styled_box = _user
 
+    # 2026-11-17：✎ 就地编辑改用统一 input_box（全量巡检：原生 QInputDialog
+    # 风格割裂）——patch 目标随之切换；ai_ops 是调用点 import，改模块属性即生效
+    def _input(parent, title, label, text="", placeholder=None, subtitle=""):
+        return (EDIT_PRESET.pop(0) if EDIT_PRESET else text), True
+    db.input_box = _input
+
     from PyQt5.QtWidgets import QInputDialog
     def _get_text(parent, title, label, echo=0, text=""):
         return (EDIT_PRESET.pop(0) if EDIT_PRESET else text), True

@@ -107,12 +107,14 @@ class BackupCenterWidget(QWidget):
         self.table = QTableWidget(0, 8)
         self.table.setHorizontalHeaderLabels(["", "时间", "类型", "操作人", "描述", "大小", "Git", "操作"])
         self.table.setColumnWidth(0, 36)
-        self.table.setColumnWidth(1, 150)
+        # 巡检实锤：时间列 150 装不下 "2026-11-09 19:08:33"、描述列被固定列挤到
+        # 临界截断——时间放宽 + 固定列收窄，把空间让给描述的 Stretch
+        self.table.setColumnWidth(1, 170)
         self.table.setColumnWidth(2, 56)
-        self.table.setColumnWidth(3, 100)
+        self.table.setColumnWidth(3, 90)
         self.table.setColumnWidth(5, 70)
         self.table.setColumnWidth(6, 80)
-        self.table.setColumnWidth(7, 170)
+        self.table.setColumnWidth(7, 150)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -125,8 +127,8 @@ class BackupCenterWidget(QWidget):
         lay.addWidget(git_head)
         self.git_view = QTableWidget(0, 3)
         self.git_view.setHorizontalHeaderLabels(["commit", "时间", "说明"])
-        self.git_view.setColumnWidth(0, 90)
-        self.git_view.setColumnWidth(1, 155)
+        self.git_view.setColumnWidth(0, 80)
+        self.git_view.setColumnWidth(1, 180)
         self.git_view.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.git_view.verticalHeader().setVisible(False)
         self.git_view.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -186,7 +188,12 @@ class BackupCenterWidget(QWidget):
             self.table.setItem(i, 2, it_type)
             it_op = QTableWidgetItem(getattr(r, "operator", "") or "—")
             self.table.setItem(i, 3, it_op)
-            self.table.setItem(i, 4, QTableWidgetItem(r.description or "—"))
+            # 描述列常超列宽（Stretch 也装不下 40+ 字描述），列表省略是标准做法；
+            # 悬停 tooltip 给全文，信息不丢（全量巡检补）
+            it_desc = QTableWidgetItem(r.description or "—")
+            if r.description:
+                it_desc.setToolTip(r.description)
+            self.table.setItem(i, 4, it_desc)
             self.table.setItem(i, 5, QTableWidgetItem(f"{r.file_size // 1024} KB"))
 
             # Git 关联（视觉评审：✓变更表意模糊 → 显示对应 commit 短哈希）
@@ -226,7 +233,9 @@ class BackupCenterWidget(QWidget):
         for i, h in enumerate(hist):
             self.git_view.setItem(i, 0, QTableWidgetItem(h["commit"]))
             self.git_view.setItem(i, 1, QTableWidgetItem(h["date"]))
-            self.git_view.setItem(i, 2, QTableWidgetItem(h["message"]))
+            it_msg = QTableWidgetItem(h["message"])
+            it_msg.setToolTip(h["message"])   # 说明列同理：省略 + 悬停全文
+            self.git_view.setItem(i, 2, it_msg)
         if not hist:
             self.hint.setText("该设备暂无 Git 变更记录（未安装 git 或全部备份内容一致）")
         else:

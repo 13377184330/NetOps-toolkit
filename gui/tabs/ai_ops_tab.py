@@ -458,6 +458,10 @@ class AIOpsTab(QWidget):
         act_bar.addWidget(self.deploy_btn)
         q_lay.addLayout(act_bar)
 
+        # 空态提示首次就要出现：_refresh_queue 里有「队列空」文案，
+        # 但此前只在卡片增删时才调用，页面初始打开右侧是裸空白（全量巡检实锤）
+        self._refresh_queue()
+
         self.splitter.addWidget(queue_group)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
@@ -1063,10 +1067,11 @@ class AIOpsTab(QWidget):
         if not (0 <= idx < len(self._cards)):
             return
         card = self._cards[idx]
-        from PyQt5.QtWidgets import QInputDialog, QLineEdit
-        new_cmd, ok = QInputDialog.getText(
-            self, "编辑命令", "修改命令内容（注释自动重新解析）：",
-            QLineEdit.Normal, card["cmd"])
+        # 巡检真机截图：原生 QInputDialog 与应用风格割裂，改统一 input_box
+        from gui.dialogs.base import input_box
+        new_cmd, ok = input_box(
+            self, "编辑命令", "命令:", text=card["cmd"],
+            subtitle="修改命令内容，注释自动重新解析并重新体检")
         if not ok:
             return
         new_cmd = new_cmd.strip()

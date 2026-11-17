@@ -267,8 +267,13 @@ class DeviceNode(QGraphicsObject):
         f_name.setBold(True)
         fm = QFontMetrics(f_name)
         fm2 = QFontMetrics(QFont("Microsoft YaHei UI", 9))
+        # 徽章行宽度计入节点宽（此前漏算：长徽章横向溢出节点矩形，
+        # 邻居节点「对端 GigabitEthernet1/0/24」实测会压到画布邻居元素）
+        _badge_row_w = (sum(fm2.horizontalAdvance(t) + 18 + 6 for t, _ in self._badges) - 6
+                        if self._badges else 0)
         self._w = max(NODE_ICON_W, fm.horizontalAdvance(self.device_name) + 8,
-                      fm2.horizontalAdvance(self.subtitle) + 8 if self.subtitle else 0)
+                      fm2.horizontalAdvance(self.subtitle) + 8 if self.subtitle else 0,
+                      _badge_row_w)
         self._compute_panel()
 
     # ---- 端口面板几何 ----
@@ -351,7 +356,9 @@ class DeviceNode(QGraphicsObject):
             pw, ph = self._panel["pw"] + 24, self._panel["ph"] + 24
             return QRectF(-pw / 2, -ph / 2, pw, ph)
         half = self._w / 2 + 12
-        return QRectF(-half, -NODE_ICON_H / 2 - 14, half * 2, NODE_ICON_H + 76)
+        # 高度覆盖到徽章行底（副标题 +22 起，徽章 +50 起、高 20 → 底缘 +99，
+        # 留余量到 +101；曾 +76 会截掉徽章底边）
+        return QRectF(-half, -NODE_ICON_H / 2 - 14, half * 2, NODE_ICON_H + 86)
 
     def _tooltip(self):
         lines = [f"{self.device_name}"]
@@ -396,8 +403,9 @@ class DeviceNode(QGraphicsObject):
                              Qt.AlignHCenter | Qt.AlignVCenter, self.subtitle)
 
         # 参数徽章行（IP / VLAN 直接上图，不用点开任何窗口）
+        # 与副标题拉开呼吸空间（+50；曾 +44 贴太近，真机巡检观感重叠）
         if self._badges:
-            self._paint_badges(painter, NODE_ICON_H / 2 + 44)
+            self._paint_badges(painter, NODE_ICON_H / 2 + 50)
 
         # 选中环
         if self.isSelected():
@@ -1218,8 +1226,8 @@ class NetworkTopologyPage(QWidget):
                                     "改参数实时出命令，一键应用（经确认后写入设备）")
         panel_btn.clicked.connect(self.show_device_panel)
 
-        help_btn = make_button("为什么只有自己？", "ghost",
-                               tip="说明拓扑的数据来源与发现不到设备的原因")
+        help_btn = make_button("❓", "ghost",
+                               tip="为什么只有自己？——说明拓扑的数据来源与发现不到设备的原因")
         help_btn.clicked.connect(self.show_why)
 
         add_btn = make_button("＋ 添加设备", "secondary")
@@ -1246,6 +1254,9 @@ class NetworkTopologyPage(QWidget):
 
         for w in (collect_btn, panel_btn, help_btn, add_btn, ports_btn,
                   layout_btn, fit_btn, self.live_btn):
+            # 工具栏按钮最窄不得小于文字宽度：高 DPI 窄窗口下布局会压缩长文本按钮
+            # （真机巡检实锤：「为什么只有自己？」被压到只剩「么只有自i」）
+            w.setMinimumWidth(w.sizeHint().width())
             bar.addWidget(w)
         layout.addLayout(bar)
 

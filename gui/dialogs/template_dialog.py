@@ -18,7 +18,7 @@ v2（真机截图反馈）：此前仍是系统原生蓝标题栏 + 自绘蓝色
 from PyQt5.QtWidgets import (QVBoxLayout, QHBoxLayout, QLabel,
                               QPushButton, QListWidget, QListWidgetItem,
                               QTextEdit, QLineEdit, QComboBox, QTabWidget,
-                              QWidget, QFileDialog, QInputDialog, QSplitter,
+                              QWidget, QFileDialog, QSplitter,
                               QSizePolicy)
 from PyQt5.QtCore import Qt, pyqtSignal
 
@@ -27,7 +27,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from gui.dialogs.base import (BaseDialog, make_button, info_box, warn_box,
-                              question_box)
+                              question_box, input_box)
 from utils.template_manager import TemplateManager, Template
 
 
@@ -294,7 +294,8 @@ class TemplateManagerDialog(BaseDialog):
         self.use_template()
 
     def create_template(self):
-        name, ok = QInputDialog.getText(self, "新建模板", "请输入模板名称:")
+        # 巡检真机截图：原生 QInputDialog 与应用风格割裂，改统一 input_box
+        name, ok = input_box(self, "新建模板", "模板名称:", placeholder="请输入模板名称")
         if ok and name:
             template = Template(
                 name=name,
@@ -331,11 +332,8 @@ class TemplateManagerDialog(BaseDialog):
         if not self.current_template:
             return
 
-        new_name, ok = QInputDialog.getText(
-            self, "复制模板",
-            "请输入新模板名称:",
-            text=f"{self.current_template.name}_副本"
-        )
+        new_name, ok = input_box(self, "复制模板", "新模板名称:",
+                                 text=f"{self.current_template.name}_副本")
 
         if ok and new_name:
             if self.template_manager.duplicate_template(

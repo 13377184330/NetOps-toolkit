@@ -42,11 +42,13 @@ def scroll_wrap(widget):
                                  QLineEdit, QSpinBox, QComboBox)
     from PyQt5.QtCore import Qt
     for editor in widget.findChildren(QLineEdit):
-        editor.setMinimumWidth(150)
+        editor.setMinimumWidth(max(150, editor.minimumWidth()))
     for sp in widget.findChildren(QSpinBox):
-        sp.setMinimumWidth(110)
+        sp.setMinimumWidth(max(110, sp.minimumWidth()))
     for cb in widget.findChildren(QComboBox):
-        cb.setMinimumWidth(130)
+        # 取 max：尊重控件自己声明的更大下限（如 Console 串口下拉 260，
+        # 曾被这里硬设 130 打回导致长描述被截断）
+        cb.setMinimumWidth(max(130, cb.minimumWidth()))
     for panel in widget.findChildren(QWidget):
         lay = panel.layout()
         if lay is None:

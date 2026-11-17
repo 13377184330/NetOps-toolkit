@@ -181,6 +181,9 @@ class BatchConfigDialog(BaseDialog):
         self.device_table.setColumnCount(5)
         self.device_table.setHorizontalHeaderLabels(["主机名", "管理IP", "掩码", "VLAN列表", "备注"])
         self.device_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        # 管理IP 随内容自适应：默认 Interactive ~100px 会把 192.168.x.x 截成 "192.168..."
+        # （全量巡检真机截图实锤）；与 Ping 工具同款模式
+        self.device_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.device_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.device_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.device_table.setMinimumHeight(160)

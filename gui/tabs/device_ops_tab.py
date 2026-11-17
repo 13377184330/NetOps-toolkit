@@ -275,6 +275,9 @@ class DeviceOpsTab(QWidget):
         log_layout.setContentsMargins(14, 26, 14, 14)
         self.output = QTextEdit()
         self.output.setReadOnly(True)
+        # 空态提示（全量巡检：空回显区是裸空白，用户不知道结果会出现在哪）
+        self.output.setPlaceholderText(
+            "尚未执行操作——选中设备后执行 命令执行 / 配置备份 / 连通测试，回显会显示在这里")
         log_layout.addWidget(self.output)
         ops_row.addWidget(log_group)
 

@@ -157,7 +157,11 @@ class ConsoleVizTab(QWidget):
         # 串口名 + 描述动辄 30+ 字符，按内容自适应宽度，否则"（未检测到串口）"会被截成
         # "（未检测到串"（实测）。同时给一个不裁切的下限。
         self.port_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.port_combo.setMinimumWidth(220)
+        self.port_combo.setMinimumWidth(260)
+        # 关键坑：窗口级 QSS 的 QComboBox{min-width:6em} 会**整体替换**控件显式
+        # 最小宽（QStyleSheetStyle 盒子模型接管，setMinimumWidth(260) 实测被
+        # 打回 138→长描述截断似乱码）。控件级 QSS 优先级最高，用同机制抬下限。
+        self.port_combo.setStyleSheet("QComboBox { min-width: 15em; }")
         self.refresh_ports()
 
         refresh_btn = QPushButton("刷新串口")
@@ -333,6 +337,10 @@ class ConsoleVizTab(QWidget):
         ports = cr.list_console_ports()
         if ports:
             for p, desc in ports:
+                # pyserial 的 description 自带 "(COMn)" 后缀，与前面的端口名重复；
+                # 全量巡检实锤：窄框装不下 "COM11 — USB Serial Port (COM11)"，
+                # 被省略号截断后视觉近似乱码
+                desc = desc.replace(f" ({p})", "").strip()
                 self.port_combo.addItem(f"{p} — {desc}", p)
         else:
             self.port_combo.addItem("未检测到串口", "")
