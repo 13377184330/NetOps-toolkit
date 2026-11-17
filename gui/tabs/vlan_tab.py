@@ -362,6 +362,9 @@ class VLANConfigTab(QWidget):
             if vendor == "maipu":
                 from modules.maipu_config import generate_vlan_all
                 return generate_vlan_all(config)
+            if vendor == "cisco":
+                from modules.cisco_config import generate_vlan_all
+                return generate_vlan_all(config)
             return VLANConfigGenerator.generate_vlan_all(config)
         return ""
     

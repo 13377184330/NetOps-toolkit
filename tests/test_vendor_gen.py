@@ -83,8 +83,8 @@ EXPECT = {
             iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
     3: dict(vendor="maipu",   name="迈普",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="Vlan1",            iface_default="Vlan1",            header="迈普交换机配置脚本",
             iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
-    4: dict(vendor="cisco",   name="思科",  host=None,                 vlan_kw=None,             ifname=None,               iface_default="Vlan1",            header="思科交换机配置脚本",
-            iface_kw=None, vlanif_kw=None, route_kw=None, ds_kw=None),
+    4: dict(vendor="cisco",   name="思科",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="interface vlan 1\n ip address 192.168.1.10", iface_default="vlan 1",            header="思科交换机配置脚本",
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
 }
 
 def _click_btn(widget, text):
@@ -142,11 +142,8 @@ for idx, exp in EXPECT.items():
     if not out:
         continue
     if exp["host"] is None:
-        # 已知缺口：思科无配置生成器（软件生成时须弹警告提示）；不作为失败项，记录现状
-        warned = any(p["kind"] == "warn" and "思科" in p["text"] for p in popups)
-        case(f"{v}2a 思科无生成器但生成时有警告弹窗", warned,
-             "弹出「思科模式暂不支持配置生成」警告" if warned
-             else f"实际弹窗: " + ";".join(p['title'] for p in popups))
+        # 已知缺口保留钩子：若某厂商再出现无生成器状态，须在生成时弹警告
+        pass
     else:
         case(f"{v}2 主机名命令符合{nm}语法", exp["host"] in out,
              "" if exp["host"] in out else f"期望「{exp['host']}」实际输出:\n" + "\n".join(out.splitlines()[:8]))

@@ -429,7 +429,9 @@ class RuijieInterfaceGenerator:
     
     @staticmethod
     def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None,
-                           trunk_vlans=None, native_vlan=None):
+                           trunk_vlans=None, native_vlan=None, lacp=True):
+        """锐捷 AggregatePort：成员口 port-group N [mode active]（五厂商对照实锤）。
+        mode 为聚合口二层模式（trunk/access），lacp=True 时成员口加 mode active"""
         lines = [f"interface aggregateport {trunk_id}"]
         if description:
             lines.append(f" description {description}")
@@ -444,7 +446,7 @@ class RuijieInterfaceGenerator:
         if members:
             for member in members:
                 lines.append(f"interface {member}")
-                lines.append(f" port-group {trunk_id}")
+                lines.append(f" port-group {trunk_id} mode active" if lacp else f" port-group {trunk_id}")
                 lines.append("!")
         
         return "\n".join(lines)
@@ -613,10 +615,13 @@ def generate_interface_all(config: dict) -> str:
     """消费接口页签 config dict（eth_trunks/lldp/loopback_detection/poe/rate_limits）"""
     parts = []
     for t in config.get("eth_trunks", []):
+        # tab 的 mode：lacp-static/lacp-dynamic → LACP（成员口 mode active）；manual → 静态
+        tab_mode = t.get("mode", "lacp-static")
         parts.append(RuijieInterfaceGenerator.generate_eth_trunk(
             t["trunk_id"], t.get("port_link_type", "trunk"),
             t.get("member_ports"), t.get("description"),
-            t.get("trunk_vlans"), t.get("native_vlan")))
+            t.get("trunk_vlans"), t.get("native_vlan"),
+            lacp=("lacp" in tab_mode)))
     if "lldp" in config:
         l = config["lldp"]
         parts.append(RuijieInterfaceGenerator.generate_lldp(

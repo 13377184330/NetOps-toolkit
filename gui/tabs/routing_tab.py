@@ -353,6 +353,9 @@ class RoutingConfigTab(QWidget):
             if vendor == "maipu":
                 from modules.maipu_config import generate_route_all
                 return generate_route_all(config)
+            if vendor == "cisco":
+                from modules.cisco_config import generate_route_all
+                return generate_route_all(config)
             return RoutingConfigGenerator.generate_route_all(config)
         return ""
     

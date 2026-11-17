@@ -415,13 +415,15 @@ class MaipuSecurityGenerator:
 
     @staticmethod
     def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
+        # 五厂商对照实锤：迈普 S3400/S4330 接入系列只支持 pps/bps、无百分比模式，
+        # 用 pps 跨全系列最稳；旧版 rate 关键字非实机语法已修正
         lines = [f"interface {interface}"]
         if broadcast:
-            lines.append(f" storm-control broadcast rate {broadcast}")
+            lines.append(f" storm-control broadcast pps {broadcast}")
         if multicast:
-            lines.append(f" storm-control multicast rate {multicast}")
+            lines.append(f" storm-control multicast pps {multicast}")
         if unicast:
-            lines.append(f" storm-control unicast rate {unicast}")
+            lines.append(f" storm-control unicast pps {unicast}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -430,19 +432,28 @@ class MaipuInterfaceGenerator:
     """迈普接口配置生成器"""
     
     @staticmethod
-    def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None):
-        lines = [f"interface eth-trunk {trunk_id}"]
-        if description:
-            lines.append(f" description {description}")
-        lines.append(f" port link-type {mode}")
+    def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None,
+                           trunk_vlans=None):
+        """迈普链路聚合（五厂商对照实锤）：聚合组在全局定义，成员口用 link-aggregation 引用。
+        mode: lacp（默认，LACP 协商）| manual（手动静态聚合）"""
+        lines = []
+        if mode in ("lacp", "lacp-static", "lacp-dynamic"):
+            lines.append(f"link-aggregation {trunk_id} mode lacp")
+            member_cmd = f"link-aggregation {trunk_id} active"
+        else:
+            lines.append(f"link-aggregation {trunk_id} mode manual")
+            member_cmd = f"link-aggregation {trunk_id} manual"
         lines.append("!")
-        
         if members:
             for member in members:
                 lines.append(f"interface {member}")
-                lines.append(f" eth-trunk {trunk_id}")
+                if description:
+                    lines.append(f" description {description}")
+                lines.append(f" {member_cmd}")
+                if trunk_vlans:
+                    vlans = " ".join(str(v) for v in trunk_vlans) if isinstance(trunk_vlans, (list, tuple)) else str(trunk_vlans)
+                    lines.append(" switchport trunk allowed vlan " + vlans)
                 lines.append("!")
-        
         return "\n".join(lines)
     
     @staticmethod
@@ -494,9 +505,9 @@ class MaipuInterfaceGenerator:
     def generate_rate_limit(interface, rate_in=None, rate_out=None):
         lines = [f"interface {interface}"]
         if rate_in:
-            lines.append(f" storm-control broadcast rate {rate_in}")
+            lines.append(f" storm-control broadcast pps {rate_in}")
         if rate_out:
-            lines.append(f" storm-control multicast rate {rate_out}")
+            lines.append(f" storm-control multicast pps {rate_out}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -605,13 +616,13 @@ def generate_security_all(config: dict) -> str:
 
 
 def generate_interface_all(config: dict) -> str:
-    """消费接口页签 config dict；链路聚合/PoE 细粒度段带核对标注"""
+    """消费接口页签 config dict；链路聚合已按五厂商对照实锤语法生成"""
     parts = []
     for t in config.get("eth_trunks", []):
-        parts.append("# 迈普链路聚合语法请以设备型号手册核对后下发")
         parts.append(MaipuInterfaceGenerator.generate_eth_trunk(
-            t["trunk_id"], t.get("port_link_type", "trunk"),
-            t.get("member_ports"), t.get("description")))
+            t["trunk_id"], t.get("mode", "lacp"),
+            t.get("member_ports"), t.get("description"),
+            t.get("trunk_vlans")))
     if "lldp" in config:
         l = config["lldp"]
         parts.append(MaipuInterfaceGenerator.generate_lldp(

@@ -389,6 +389,9 @@ class SecurityConfigTab(QWidget):
             if vendor == "maipu":
                 from modules.maipu_config import generate_security_all
                 return generate_security_all(config)
+            if vendor == "cisco":
+                from modules.cisco_config import generate_security_all
+                return generate_security_all(config)
             return SecurityConfigGenerator.generate_security_all(config)
         return ""
     

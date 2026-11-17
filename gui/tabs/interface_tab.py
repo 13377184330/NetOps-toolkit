@@ -397,6 +397,9 @@ class InterfaceConfigTab(QWidget):
             if vendor == "maipu":
                 from modules.maipu_config import generate_interface_all
                 return generate_interface_all(config)
+            if vendor == "cisco":
+                from modules.cisco_config import generate_interface_all
+                return generate_interface_all(config)
             return InterfaceConfigGenerator.generate_interface_all(config)
         return ""
     

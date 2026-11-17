@@ -807,10 +807,10 @@ class MainWindow(QMainWindow):
         
         for tab in self.tabs.values():
             tab.clear_config()
-        # 管理接口名按厂商给默认值（与各厂商模板一致），用户可手改
+        # 管理接口名按厂商给默认值（与各厂商模板/实机语法一致），用户可手改
         mgmt_defaults = {
             "huawei": "Vlanif1", "h3c": "Vlan-interface1",
-            "ruijie": "VLAN 1", "maipu": "Vlan1", "cisco": "Vlan1",
+            "ruijie": "VLAN 1", "maipu": "Vlan1", "cisco": "vlan 1",
         }
         self.tabs["basic"].mgmt_interface.setText(mgmt_defaults[self.current_device_type])
         self.preview_text.clear()
@@ -1059,12 +1059,6 @@ class MainWindow(QMainWindow):
         
         if self.current_device_type == "h3c":
             full_config = full_config.replace("Vlanif", "Vlan-interface")
-        
-        # 思科暂无配置生成器（仅支持 Console 采集识别）：输出为华为语法，
-        # 必须显式警告，防止用户直接粘贴到思科设备
-        if self.current_device_type == "cisco":
-            warn_box(self, "警告", "思科模式暂不支持配置生成（思科目前仅支持 Console 采集识别）。\n"
-                                 "当前输出为华为/H3C 风格语法，请勿直接用于思科设备！")
         
         self._clean_config = header + full_config
         self._render_preview()

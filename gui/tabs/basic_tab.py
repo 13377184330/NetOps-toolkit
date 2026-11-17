@@ -358,6 +358,9 @@ class BasicConfigTab(QWidget):
             if vendor == "maipu":
                 from modules.maipu_config import MaipuBasicGenerator
                 return MaipuBasicGenerator.generate_basic_all(config)
+            if vendor == "cisco":
+                from modules.cisco_config import CiscoBasicGenerator
+                return CiscoBasicGenerator.generate_basic_all(config)
             return BasicConfigGenerator.generate_basic_all(config)
         return ""
     
