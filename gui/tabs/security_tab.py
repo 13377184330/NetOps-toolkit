@@ -307,7 +307,8 @@ class SecurityConfigTab(QWidget):
         
         info_box(self, "成功", f"ACL {self.traffic_filter_acl.value()} 已应用到接口 {interface}")
     
-    def get_config(self):
+    def get_config(self, vendor=None):
+        """生成安全配置；vendor 为 None 时保持华为语法（兼容旧调用方）"""
         config = {}
         
         if self.acls:
@@ -382,6 +383,12 @@ class SecurityConfigTab(QWidget):
             }
         
         if config:
+            if vendor == "ruijie":
+                from modules.ruijie_config import generate_security_all
+                return generate_security_all(config)
+            if vendor == "maipu":
+                from modules.maipu_config import generate_security_all
+                return generate_security_all(config)
             return SecurityConfigGenerator.generate_security_all(config)
         return ""
     

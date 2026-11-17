@@ -716,7 +716,8 @@ class MainWindow(QMainWindow):
         # 菜单是入口不是清单：总入口（工具箱网格含全部 17 个工具卡片）+
         # 高频 5 项直达 + 带全局快捷键的 3 项（保留肌肉记忆，删了快捷键就失效）。
         # （历史版本 18 项一列垂到屏底，真机截图反馈“左右失衡”）
-        all_tools_action = QAction("🧰 打开工具箱（全部工具）", self)
+        # 全量巡检：全菜单唯一的 emoji 前缀显得孤立（其余 30+ 项均无图标），去掉保持统一
+        all_tools_action = QAction("打开工具箱（全部工具）", self)
         all_tools_action.setShortcut("Ctrl+T")
         all_tools_action.triggered.connect(self.open_tools_window)
         tools_menu.addAction(all_tools_action)
@@ -1021,22 +1022,23 @@ class MainWindow(QMainWindow):
         if basic_config:
             all_config.append(basic_config)
         
-        vlan_config = self.tabs["vlan"].get_config()
+        vlan_config = self.tabs["vlan"].get_config(self.current_device_type)
         if vlan_config:
             all_config.append(vlan_config)
-        
-        routing_config = self.tabs["routing"].get_config()
+
+        routing_config = self.tabs["routing"].get_config(self.current_device_type)
         if routing_config:
             all_config.append(routing_config)
-        
-        security_config = self.tabs["security"].get_config()
+
+        security_config = self.tabs["security"].get_config(self.current_device_type)
         if security_config:
             all_config.append(security_config)
-        
-        interface_config = self.tabs["interface"].get_config()
+
+        interface_config = self.tabs["interface"].get_config(self.current_device_type)
         if interface_config:
             all_config.append(interface_config)
-        
+
+        # 高级配置页自带五厂商派系渲染（adv_modules.gen(vendor, ...)），无需传参
         adv_config = self.tabs["adv"].get_config()
         if adv_config:
             all_config.append(adv_config)

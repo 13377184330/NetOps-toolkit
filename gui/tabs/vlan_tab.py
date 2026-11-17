@@ -331,7 +331,8 @@ class VLANConfigTab(QWidget):
         self.pvid_input.setEnabled(is_trunk)
         self.port_vlan_id.setEnabled(not is_trunk)
     
-    def get_config(self):
+    def get_config(self, vendor=None):
+        """生成 VLAN 配置；vendor 为 None 时保持华为语法（兼容旧调用方）"""
         config = {}
         
         if self.vlans:
@@ -355,6 +356,12 @@ class VLANConfigTab(QWidget):
             }
         
         if config:
+            if vendor == "ruijie":
+                from modules.ruijie_config import generate_vlan_all
+                return generate_vlan_all(config)
+            if vendor == "maipu":
+                from modules.maipu_config import generate_vlan_all
+                return generate_vlan_all(config)
             return VLANConfigGenerator.generate_vlan_all(config)
         return ""
     

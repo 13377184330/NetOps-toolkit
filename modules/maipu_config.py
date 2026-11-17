@@ -314,6 +314,14 @@ class MaipuRoutingGenerator:
         lines.append("!")
         return "\n".join(lines)
 
+    @staticmethod
+    def generate_rip(version=2, networks=None):
+        lines = ["router rip", f" version {version}"]
+        for network in networks or []:
+            lines.append(f" network {network}")
+        lines.append("!")
+        return "\n".join(lines)
+
 
 class MaipuSecurityGenerator:
     """迈普安全配置生成器"""
@@ -377,6 +385,46 @@ class MaipuSecurityGenerator:
  ip access-group {acl_number} {direction}
 !"""
 
+    @staticmethod
+    def generate_dhcp_snooping(enable=True, trusted_ports=None, vlan=None):
+        """IOS 家族通用语法；迈普各型号细节请以设备手册核对后下发"""
+        if not enable:
+            return "no ip dhcp snooping\n!"
+        lines = ["ip dhcp snooping"]
+        if vlan:
+            lines.append(f"ip dhcp snooping vlan {vlan}")
+        for port in trusted_ports or []:
+            lines.append(f"interface {port}")
+            lines.append(" ip dhcp snooping trust")
+        lines.append("!")
+        return "\n".join(lines)
+
+    @staticmethod
+    def generate_arp_inspection(vlans=None, trusted_ports=None):
+        """IOS 家族通用语法；迈普各型号细节请以设备手册核对后下发"""
+        lines = []
+        if vlans:
+            lines.append(f"ip arp inspection vlan {' '.join(map(str, vlans))}")
+        for port in trusted_ports or []:
+            lines.append(f"interface {port}")
+            lines.append(" ip arp inspection trust")
+        if lines:
+            lines.append("!")
+            return "\n".join(lines)
+        return ""
+
+    @staticmethod
+    def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
+        lines = [f"interface {interface}"]
+        if broadcast:
+            lines.append(f" storm-control broadcast rate {broadcast}")
+        if multicast:
+            lines.append(f" storm-control multicast rate {multicast}")
+        if unicast:
+            lines.append(f" storm-control unicast rate {unicast}")
+        lines.append("!")
+        return "\n".join(lines)
+
 
 class MaipuInterfaceGenerator:
     """迈普接口配置生成器"""
@@ -423,23 +471,23 @@ class MaipuInterfaceGenerator:
     
     @staticmethod
     def generate_poe(interface=None, enable=True, priority="low", power=None):
+        # 核验依据：迈普 SM3100/SM3900 实机命令手册——PoE 总闸/分闸均为
+        # power inline enable，关闭为 no power inline enable（旧版 poe enable 非实机语法，已修正）
+        # priority/max-power 为 IOS 家族扩展写法，未在公开手册核到，下发前请以型号手册核对
         lines = []
         if interface:
             lines.append(f"interface {interface}")
             if enable:
-                lines.append(" poe enable")
+                lines.append(" power inline enable")
                 if priority:
-                    lines.append(f" poe priority {priority}")
+                    lines.append(f" power inline priority {priority}")
                 if power:
-                    lines.append(f" poe max-power {power}")
+                    lines.append(f" power inline max {power}")
             else:
-                lines.append(" no poe enable")
+                lines.append(" no power inline enable")
             lines.append("!")
         else:
-            if enable:
-                lines.append("poe enable")
-            else:
-                lines.append("no poe enable")
+            lines.append("power inline enable" if enable else "no power inline enable")
         return "\n".join(lines)
     
     @staticmethod
@@ -451,3 +499,136 @@ class MaipuInterfaceGenerator:
             lines.append(f" storm-control multicast rate {rate_out}")
         lines.append("!")
         return "\n".join(lines)
+
+
+# ================================================================ 页签级聚合
+# 与华为侧 VLANConfigGenerator.generate_vlan_all 等消费同一 config dict，
+# 页签层零字段适配即可按厂商取用。迈普未在公开渠道核到的细粒度语法
+# 在对应段带「请以设备手册核对」标注，不静默猜测。
+
+def _acl_rules(rules):
+    """页签 ACL 规则字段 → 迈普生成器字段（None → any/ip 兑底）"""
+    return [{
+        "action": r.get("action", "permit"),
+        "protocol": r.get("protocol") or "ip",
+        "source": r.get("source") or "any",
+        "src_wildcard": r.get("source_wildcard") or "",
+        "dest": r.get("destination") or "any",
+        "dst_wildcard": r.get("destination_wildcard") or "",
+        "port": r.get("dest_port") or "",
+    } for r in rules]
+
+
+def _vlans_str(v):
+    if v is None:
+        return None
+    return " ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
+
+
+def generate_vlan_all(config: dict) -> str:
+    """消费 VLAN 页签 config dict（vlans/interfaces/vlanifs/stp）"""
+    parts = []
+    if "vlans" in config:
+        parts.append(MaipuVLANGenerator.generate_vlans(config["vlans"]))
+    if "interfaces" in config:
+        parts.append("\n".join(MaipuVLANGenerator.generate_interface(
+            i["interface"], i.get("type", "access"), i.get("vlan_id"),
+            _vlans_str(i.get("trunk_vlans")), i.get("pvid"))
+            for i in config["interfaces"]))
+    if "vlanifs" in config:
+        parts.append("\n".join(MaipuVLANGenerator.generate_vlanif(
+            v["vlan_id"], v["ip_address"], v.get("mask", "255.255.255.0"), v.get("description"))
+            for v in config["vlanifs"]))
+    if "stp" in config:
+        s = config["stp"]
+        parts.append(MaipuVLANGenerator.generate_stp(
+            s.get("mode", "rstp"), s.get("priority", 32768), s.get("enable", True)))
+    return "\n".join(p for p in parts if p)
+
+
+def generate_route_all(config: dict) -> str:
+    """消费路由页签 config dict（static_routes/ospf/bgp/rip）"""
+    parts = []
+    for r in config.get("static_routes", []):
+        parts.append(MaipuRoutingGenerator.generate_static_route(
+            r["dest_network"], r["mask"],
+            r.get("next_hop") or r.get("interface"), r.get("preference") or 60))
+    if "ospf" in config:
+        o = config["ospf"]
+        nets = [{"network": n["address"], "wildcard": n.get("mask", "0.0.0.255"),
+                 "area": o.get("area_id", "0")} for n in o.get("networks", [])]
+        parts.append(MaipuRoutingGenerator.generate_ospf(
+            o.get("process_id", 1), o.get("router_id"), nets))
+    if "bgp" in config:
+        b = config["bgp"]
+        peers = [{"ip": p["ip"], "remote_as": p["as"]} for p in b.get("peers", [])]
+        parts.append(MaipuRoutingGenerator.generate_bgp(
+            b["as_number"], b.get("router_id"), peers, b.get("networks", [])))
+    if "rip" in config:
+        rip = config["rip"]
+        parts.append(MaipuRoutingGenerator.generate_rip(
+            rip.get("version", 2), rip.get("networks", [])))
+    return "\n".join(p for p in parts if p)
+
+
+def generate_security_all(config: dict) -> str:
+    """消费安全页签 config dict；DHCP/ARP 段为 IOS 家族通用语法，带核对标注"""
+    parts = []
+    for acl in config.get("acls", []):
+        parts.append(MaipuSecurityGenerator.generate_acl(
+            acl["number"], _acl_rules(acl.get("rules", [])), acl.get("description")))
+    for ps in config.get("port_security", []):
+        parts.append(MaipuSecurityGenerator.generate_port_security(
+            ps["interface"], ps.get("max_mac", 1), ps.get("action", "shutdown"),
+            ps.get("sticky", False)))
+    for tf in config.get("traffic_filters", []):
+        parts.append(MaipuSecurityGenerator.generate_traffic_filter(
+            tf["interface"], tf["acl_number"], tf.get("direction", "in")))
+    if "dhcp_snooping" in config:
+        ds = config["dhcp_snooping"]
+        parts.append("# 迈普 DHCP Snooping 为 IOS 家族写法，请以设备型号手册核对后下发")
+        parts.append(MaipuSecurityGenerator.generate_dhcp_snooping(
+            ds.get("enable", True), ds.get("trusted_ports"), ds.get("vlan")))
+    if "arp_inspection" in config:
+        ai = config["arp_inspection"]
+        parts.append("# 迈普 ARP 检测为 IOS 家族写法，请以设备型号手册核对后下发")
+        parts.append(MaipuSecurityGenerator.generate_arp_inspection(
+            ai.get("vlans"), ai.get("trusted_ports")))
+    for st in config.get("storm_controls", []):
+        parts.append(MaipuSecurityGenerator.generate_storm_control(
+            st["interface"], st.get("broadcast"), st.get("multicast"), st.get("unicast")))
+    if "anti_attack" in config:
+        # 防攻击语法厂商差异大，不自动翻译，防静默漏配
+        parts.append(f"# 反攻击功能（类型 {config['anti_attack'].get('type', 'all')}）"
+                     "请按迈普设备手册核对后手工补充")
+    return "\n".join(p for p in parts if p)
+
+
+def generate_interface_all(config: dict) -> str:
+    """消费接口页签 config dict；链路聚合/PoE 细粒度段带核对标注"""
+    parts = []
+    for t in config.get("eth_trunks", []):
+        parts.append("# 迈普链路聚合语法请以设备型号手册核对后下发")
+        parts.append(MaipuInterfaceGenerator.generate_eth_trunk(
+            t["trunk_id"], t.get("port_link_type", "trunk"),
+            t.get("member_ports"), t.get("description")))
+    if "lldp" in config:
+        l = config["lldp"]
+        parts.append(MaipuInterfaceGenerator.generate_lldp(
+            l.get("enable", True), l.get("mode", "both"),
+            l.get("interval", 30), l.get("holdtime", 120)))
+    if "loopback_detection" in config:
+        ld = config["loopback_detection"]
+        parts.append(MaipuInterfaceGenerator.generate_loop_detect(
+            ld.get("enable", True), ld.get("interval", 5), ld.get("action", "shutdown")))
+    if "poe" in config:
+        p = config["poe"]
+        parts.append(MaipuInterfaceGenerator.generate_poe(
+            None, p.get("enable", True), None, p.get("max_power")))
+        for i in p.get("interfaces", []):
+            parts.append(MaipuInterfaceGenerator.generate_poe(
+                i["interface"], i.get("enable", True), i.get("priority"), i.get("max_power")))
+    for rl in config.get("rate_limits", []):
+        parts.append(MaipuInterfaceGenerator.generate_rate_limit(
+            rl["interface"], rl.get("cir_in"), rl.get("cir_out")))
+    return "\n".join(p for p in parts if p)

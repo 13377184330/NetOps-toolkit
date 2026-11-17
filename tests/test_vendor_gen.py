@@ -72,14 +72,28 @@ for b in win.findChildren(QPushButton):
         break
 case("T0 找到「生成配置」按钮", gen_btn is not None)
 
-# 每个厂商的期望：主机名命令、VLAN 创建语法、管理接口名、头部标题
+# 每个厂商的期望：主机名命令、VLAN 创建语法、管理接口名、头部标题，
+# 以及接口VLAN/VLANIF/静态路由/DHCP Snooping 的厂商化语法关键词
 EXPECT = {
-    0: dict(vendor="huawei",  name="华为",  host="sysname SW-TEST",    vlan_kw="vlan 10",  ifname="Vlanif1",         iface_default="Vlanif1",         header="华为交换机配置脚本"),
-    1: dict(vendor="h3c",     name="H3C",   host="sysname SW-TEST",    vlan_kw="Vlan-interface", ifname="Vlan-interface1", iface_default="Vlan-interface1", header="H3C华三交换机配置脚本"),
-    2: dict(vendor="ruijie",  name="锐捷",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="interface VLAN 1", iface_default="VLAN 1",          header="锐捷交换机配置脚本"),
-    3: dict(vendor="maipu",   name="迈普",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="Vlan1",            iface_default="Vlan1",            header="迈普交换机配置脚本"),
-    4: dict(vendor="cisco",   name="思科",  host=None,                 vlan_kw=None,             ifname=None,               iface_default="Vlan1",            header="思科交换机配置脚本"),
+    0: dict(vendor="huawei",  name="华为",  host="sysname SW-TEST",    vlan_kw="vlan 10",  ifname="Vlanif1",         iface_default="Vlanif1",         header="华为交换机配置脚本",
+            iface_kw="port link-type access", vlanif_kw="interface Vlanif10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable"),
+    1: dict(vendor="h3c",     name="H3C",   host="sysname SW-TEST",    vlan_kw="Vlan-interface", ifname="Vlan-interface1", iface_default="Vlan-interface1", header="H3C华三交换机配置脚本",
+            iface_kw="port link-type access", vlanif_kw="interface Vlan-interface10\n ip address 192.168.10.1", route_kw="ip route-static 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="dhcp snooping enable"),
+    2: dict(vendor="ruijie",  name="锐捷",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="interface VLAN 1\n ip address 192.168.1.10", iface_default="VLAN 1",          header="锐捷交换机配置脚本",
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
+    3: dict(vendor="maipu",   name="迈普",  host="hostname SW-TEST",   vlan_kw="vlan 10",        ifname="Vlan1",            iface_default="Vlan1",            header="迈普交换机配置脚本",
+            iface_kw="switchport mode access", vlanif_kw="interface vlan 10\n ip address 192.168.10.1", route_kw="ip route 192.168.20.0 255.255.255.0 192.168.1.254", ds_kw="ip dhcp snooping"),
+    4: dict(vendor="cisco",   name="思科",  host=None,                 vlan_kw=None,             ifname=None,               iface_default="Vlan1",            header="思科交换机配置脚本",
+            iface_kw=None, vlanif_kw=None, route_kw=None, ds_kw=None),
 }
+
+def _click_btn(widget, text):
+    """黑盒定位局部变量按钮：按文本精确匹配点击"""
+    for b in widget.findChildren(QPushButton):
+        if b.text() == text:
+            b.click()
+            return True
+    return False
 
 for idx, exp in EXPECT.items():
     v, nm = exp["vendor"], exp["name"]
@@ -100,6 +114,27 @@ for idx, exp in EXPECT.items():
     if exp["ifname"]:
         case(f"{v}0b 管理接口默认值符合{nm}", basic.mgmt_interface.text() == exp["iface_default"],
              f"输入框默认: {basic.mgmt_interface.text()}")
+    # 接口 VLAN + VLANIF + 静态路由 + DHCP Snooping（厂商聚合覆盖）
+    vlan.interface_input.setText("GigabitEthernet0/1")
+    vlan.port_vlan_id.setValue(10)
+    _click_btn(vlan, "添加接口")
+    vlan.vlanif_vlan_id.setValue(10)
+    vlan.vlanif_ip.setText("192.168.10.1")
+    _click_btn(vlan, "添加VLANIF")
+    case(f"{v}0c 接口/VLANIF 已加入列表",
+         vlan.interface_list.count() == 1 and vlan.vlanif_list.count() == 1,
+         f"接口{vlan.interface_list.count()} VLANIF{vlan.vlanif_list.count()}")
+    routing = win.tabs["routing"]
+    routing.route_dest.setText("192.168.20.0")
+    routing.route_mask.setText("255.255.255.0")
+    routing.route_nexthop.setText("192.168.1.254")
+    _click_btn(routing, "添加静态路由")
+    case(f"{v}0d 静态路由已加入列表", routing.route_list.count() == 1,
+         f"{routing.route_list.count()} 条")
+    sec = win.tabs["security"]
+    if not sec.dhcp_snoop_enable.isChecked():
+        sec.dhcp_snoop_enable.setChecked(True)
+    app.processEvents()
     gen_btn.click()
     app.processEvents()
     out = win._clean_config or win.preview_text.toPlainText()
@@ -126,6 +161,15 @@ for idx, exp in EXPECT.items():
          else f"期望「{exp['header']}」，实际头部: " + (win.preview_text.toPlainText().splitlines()[1] if len(win.preview_text.toPlainText().splitlines()) > 1 else ""))
     case(f"{v}6 成功弹窗/状态栏反馈", any(p["title"] == "成功" for p in popups) or True,
          "生成完成有弹窗反馈" if any(p["title"] == "成功" for p in popups) else "（弹窗已 patch，仅记录）")
+    if exp.get("iface_kw"):
+        case(f"{v}7 接口VLAN语法符合{nm}", exp["iface_kw"] in out,
+             "" if exp["iface_kw"] in out else f"期望「{exp['iface_kw']}」未命中")
+        case(f"{v}8 VLANIF语法符合{nm}", exp["vlanif_kw"].lower() in out.lower(),
+             "" if exp["vlanif_kw"].lower() in out.lower() else f"期望「{exp['vlanif_kw']}」未命中")
+        case(f"{v}9 静态路由语法符合{nm}", exp["route_kw"] in out,
+             "" if exp["route_kw"] in out else f"期望「{exp['route_kw']}」未命中")
+        case(f"{v}10 DHCP Snooping语法符合{nm}", exp["ds_kw"] in out,
+             "" if exp["ds_kw"] in out else f"期望「{exp['ds_kw']}」未命中")
 
 n_pass = sum(1 for _, ok, _ in results if ok)
 print("\n" + "=" * 68)

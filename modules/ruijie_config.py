@@ -313,13 +313,21 @@ class RuijieRoutingGenerator:
         lines.append("!")
         return "\n".join(lines)
 
+    @staticmethod
+    def generate_rip(version=2, networks=None):
+        lines = ["router rip", f" version {version}"]
+        for network in networks or []:
+            lines.append(f" network {network}")
+        lines.append("!")
+        return "\n".join(lines)
+
 
 class RuijieSecurityGenerator:
     """锐捷安全配置生成器"""
     
     @staticmethod
-    def generate_acl(number, rules, description=None):
-        lines = [f"ip access-list extended {number}"]
+    def generate_acl(number, rules, description=None, acl_type="extended"):
+        lines = [f"ip access-list {acl_type} {number}"]
         if description:
             lines.append(f" remark {description}")
         
@@ -375,16 +383,62 @@ class RuijieSecurityGenerator:
  ip access-group {acl_number} {direction}
 !"""
 
+    @staticmethod
+    def generate_dhcp_snooping(enable=True, trusted_ports=None, vlan=None):
+        """RGOS：DHCP Snooping（与 DAI 联动的前置项）"""
+        if not enable:
+            return "no ip dhcp snooping\n!"
+        lines = ["ip dhcp snooping"]
+        if vlan:
+            lines.append(f"ip dhcp snooping vlan {vlan}")
+        for port in trusted_ports or []:
+            lines.append(f"interface {port}")
+            lines.append(" ip dhcp snooping trust")
+        lines.append("!")
+        return "\n".join(lines)
+
+    @staticmethod
+    def generate_arp_inspection(vlans=None, trusted_ports=None):
+        """RGOS：DAI 动态 ARP 检测（需已开启 DHCP Snooping）"""
+        lines = []
+        if vlans:
+            lines.append(f"ip arp inspection vlan {' '.join(map(str, vlans))}")
+        for port in trusted_ports or []:
+            lines.append(f"interface {port}")
+            lines.append(" ip arp inspection trust")
+        if lines:
+            lines.append("!")
+            return "\n".join(lines)
+        return ""
+
+    @staticmethod
+    def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
+        lines = [f"interface {interface}"]
+        if broadcast:
+            lines.append(f" storm-control broadcast level {broadcast}")
+        if multicast:
+            lines.append(f" storm-control multicast level {multicast}")
+        if unicast:
+            lines.append(f" storm-control unicast level {unicast}")
+        lines.append("!")
+        return "\n".join(lines)
+
 
 class RuijieInterfaceGenerator:
     """锐捷接口配置生成器"""
     
     @staticmethod
-    def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None):
+    def generate_eth_trunk(trunk_id, mode="lacp", members=None, description=None,
+                           trunk_vlans=None, native_vlan=None):
         lines = [f"interface aggregateport {trunk_id}"]
         if description:
             lines.append(f" description {description}")
         lines.append(f" switchport mode {mode}")
+        if trunk_vlans:
+            vlans = " ".join(str(v) for v in trunk_vlans) if isinstance(trunk_vlans, (list, tuple)) else str(trunk_vlans)
+            lines.append(f" switchport trunk allowed vlan {vlans}")
+        if native_vlan:
+            lines.append(f" switchport trunk native vlan {native_vlan}")
         lines.append("!")
         
         if members:
@@ -449,3 +503,137 @@ class RuijieInterfaceGenerator:
             lines.append(f" storm-control multicast level {rate_out}")
         lines.append("!")
         return "\n".join(lines)
+
+
+# ================================================================ 页签级聚合
+# 与华为侧 VLANConfigGenerator.generate_vlan_all 等消费同一 config dict，
+# 页签层零字段适配即可按厂商取用（数据驱动接线，不复制表单逻辑）。
+
+def _acl_rules(rules):
+    """页签 ACL 规则字段 → 锐捷生成器字段（None → any/ip 兑底）"""
+    return [{
+        "action": r.get("action", "permit"),
+        "protocol": r.get("protocol") or "ip",
+        "source": r.get("source") or "any",
+        "src_wildcard": r.get("source_wildcard") or "",
+        "dest": r.get("destination") or "any",
+        "dst_wildcard": r.get("destination_wildcard") or "",
+        "port": r.get("dest_port") or "",
+    } for r in rules]
+
+
+def _vlans_str(v):
+    if v is None:
+        return None
+    return " ".join(str(x) for x in v) if isinstance(v, (list, tuple)) else str(v)
+
+
+def generate_vlan_all(config: dict) -> str:
+    """消费 VLAN 页签 config dict（vlans/interfaces/vlanifs/stp）"""
+    parts = []
+    if "vlans" in config:
+        parts.append(RuijieVLANGenerator.generate_vlans(config["vlans"]))
+    if "interfaces" in config:
+        parts.append("\n".join(RuijieVLANGenerator.generate_interface(
+            i["interface"], i.get("type", "access"), i.get("vlan_id"),
+            _vlans_str(i.get("trunk_vlans")), i.get("pvid"))
+            for i in config["interfaces"]))
+    if "vlanifs" in config:
+        parts.append("\n".join(RuijieVLANGenerator.generate_vlanif(
+            v["vlan_id"], v["ip_address"], v.get("mask", "255.255.255.0"), v.get("description"))
+            for v in config["vlanifs"]))
+    if "stp" in config:
+        s = config["stp"]
+        parts.append(RuijieVLANGenerator.generate_stp(
+            s.get("mode", "mstp"), s.get("priority", 32768), s.get("enable", True)))
+    return "\n".join(p for p in parts if p)
+
+
+def generate_route_all(config: dict) -> str:
+    """消费路由页签 config dict（static_routes/ospf/bgp/rip）"""
+    parts = []
+    for r in config.get("static_routes", []):
+        parts.append(RuijieRoutingGenerator.generate_static_route(
+            r["dest_network"], r["mask"],
+            r.get("next_hop") or r.get("interface"), r.get("preference") or 60))
+    if "ospf" in config:
+        o = config["ospf"]
+        nets = [{"network": n["address"], "wildcard": n.get("mask", "0.0.0.255"),
+                 "area": o.get("area_id", "0")} for n in o.get("networks", [])]
+        parts.append(RuijieRoutingGenerator.generate_ospf(
+            o.get("process_id", 1), o.get("router_id"), nets))
+    if "bgp" in config:
+        b = config["bgp"]
+        peers = [{"ip": p["ip"], "remote_as": p["as"]} for p in b.get("peers", [])]
+        parts.append(RuijieRoutingGenerator.generate_bgp(
+            b["as_number"], b.get("router_id"), peers, b.get("networks", [])))
+    if "rip" in config:
+        rip = config["rip"]
+        parts.append(RuijieRoutingGenerator.generate_rip(
+            rip.get("version", 2), rip.get("networks", [])))
+    return "\n".join(p for p in parts if p)
+
+
+def generate_security_all(config: dict) -> str:
+    """消费安全页签 config dict（acls/port_security/traffic_filters/dhcp_snooping/arp_inspection/storm_controls）"""
+    parts = []
+    for acl in config.get("acls", []):
+        parts.append(RuijieSecurityGenerator.generate_acl(
+            acl["number"], _acl_rules(acl.get("rules", [])),
+            acl.get("description"), acl_type=acl.get("type", "extended")))
+    for ps in config.get("port_security", []):
+        parts.append(RuijieSecurityGenerator.generate_port_security(
+            ps["interface"], ps.get("max_mac", 1), ps.get("action", "shutdown"),
+            ps.get("sticky", False)))
+    for tf in config.get("traffic_filters", []):
+        parts.append(RuijieSecurityGenerator.generate_traffic_filter(
+            tf["interface"], tf["acl_number"], tf.get("direction", "in")))
+    if "dhcp_snooping" in config:
+        ds = config["dhcp_snooping"]
+        parts.append(RuijieSecurityGenerator.generate_dhcp_snooping(
+            ds.get("enable", True), ds.get("trusted_ports"), ds.get("vlan")))
+    if "arp_inspection" in config:
+        ai = config["arp_inspection"]
+        parts.append(RuijieSecurityGenerator.generate_arp_inspection(
+            ai.get("vlans"), ai.get("trusted_ports")))
+    if "storm_controls" in config:
+        # 页签数值为 kbps；锐捷 storm-control level 单位为百分比，下发前请按平台换算核对
+        parts.append("# 注意：锐捷 storm-control level 为百分比单位，页签 kbps 值请换算后再下发")
+        for st in config.get("storm_controls", []):
+            parts.append(RuijieSecurityGenerator.generate_storm_control(
+                st["interface"], st.get("broadcast"), st.get("multicast"), st.get("unicast")))
+    if "anti_attack" in config:
+        # 锐捷 NFPP 与华为 anti-attack 体系不同，不自动翻译，防静默漏配
+        parts.append(f"# 反攻击功能（类型 {config['anti_attack'].get('type', 'all')}）"
+                     "请按锐捷 NFPP 手册核对后手工补充")
+    return "\n".join(p for p in parts if p)
+
+
+def generate_interface_all(config: dict) -> str:
+    """消费接口页签 config dict（eth_trunks/lldp/loopback_detection/poe/rate_limits）"""
+    parts = []
+    for t in config.get("eth_trunks", []):
+        parts.append(RuijieInterfaceGenerator.generate_eth_trunk(
+            t["trunk_id"], t.get("port_link_type", "trunk"),
+            t.get("member_ports"), t.get("description"),
+            t.get("trunk_vlans"), t.get("native_vlan")))
+    if "lldp" in config:
+        l = config["lldp"]
+        parts.append(RuijieInterfaceGenerator.generate_lldp(
+            l.get("enable", True), l.get("mode", "both"),
+            l.get("interval", 30), l.get("holdtime", 120)))
+    if "loopback_detection" in config:
+        ld = config["loopback_detection"]
+        parts.append(RuijieInterfaceGenerator.generate_loop_detect(
+            ld.get("enable", True), ld.get("interval", 5), ld.get("action", "shutdown")))
+    if "poe" in config:
+        p = config["poe"]
+        parts.append(RuijieInterfaceGenerator.generate_poe(
+            None, p.get("enable", True), None, p.get("max_power")))
+        for i in p.get("interfaces", []):
+            parts.append(RuijieInterfaceGenerator.generate_poe(
+                i["interface"], i.get("enable", True), i.get("priority"), i.get("max_power")))
+    for rl in config.get("rate_limits", []):
+        parts.append(RuijieInterfaceGenerator.generate_rate_limit(
+            rl["interface"], rl.get("cir_in"), rl.get("cir_out")))
+    return "\n".join(p for p in parts if p)
