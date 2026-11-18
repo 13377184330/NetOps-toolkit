@@ -8,15 +8,13 @@ import re
 
 def _vrp_timezone(timezone):
     """`UTC+8`/`UTC-5` → VRP `clock timezone NAME {add|subtract} HH:MM:00`。
-
-    原实现偏移硬编码 `add 08:00:00`，GUI 选 UTC-5/UTC+0 时偏移全错。
+    解析复用公共函数；越界偏移标 _CHECK 并回退 0，不生成非法命令。
     """
-    s = str(timezone).strip()
-    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
-    if m:
-        name, sign, h = m.group(1), m.group(2), int(m.group(3))
-        return name, ("subtract" if sign == "-" else "add"), f"{h:02d}:00:00"
-    return (s.replace(" ", "_") or "UTC"), "add", "00:00:00"
+    from utils.net_addr import parse_timezone
+    name, hours, valid = parse_timezone(timezone)
+    if not valid:
+        return f"{name}_CHECK", "add", "00:00:00"
+    return name, ("subtract" if hours < 0 else "add"), f"{abs(hours):02d}:00:00"
 
 
 class BasicConfigGenerator:

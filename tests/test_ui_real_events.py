@@ -247,7 +247,8 @@ def main():
         pump(150)
         check("真实点击停止→即时恢复", ai.send_btn.isVisible())
     else:
-        check("生成过快停止按钮已隐藏（生成完成）", True)
+        # 原来无条件 check(True) 恒真；生成完成应恢复发送按钮可见
+        check("生成过快停止按钮已隐藏（生成完成）", ai.send_btn.isVisible())
 
     # 2.7 下发按钮真实点击（无凭据拦截）
     ai._toggle_all(False)
@@ -380,7 +381,8 @@ def main():
         ok = wait_until(lambda: tab.connect_btn.isEnabled() and tab._last_result, timeout=300)
         check("真机采集完成", ok, f"{len(tab.raw_view.toPlainText())} 字符")
     else:
-        check("无串口环境跳过采集（降级路径）", True)
+        # 无串口属环境跳过，不计入 PASS（避免"跳过伪装成通过"）
+        print("  [SKIP] 无串口环境跳过采集（降级路径）", flush=True)
 
     WIN.grab().save(os.path.join(OUT, "shot_ui_real_final.png"))
     n_pass = sum(1 for _, ok, _ in results if ok)

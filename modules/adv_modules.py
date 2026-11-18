@@ -74,12 +74,25 @@ def gen_stack(vendor, p):
             (f" port-member interface {p2}", f"VSL 成员口 {p2}"),
         ]
     else:
+        # Cisco StackWise 优先级合法范围 1-15，而表单默认 150（华为 iStack
+        # 的量级）。不钳制会生成设备必拒的 `switch 1 priority 150`。
+        prio_show = prio
+        _range_note = ""
+        if vendor == "cisco":
+            try:
+                _p = int(prio)
+                if _p > 15 or _p < 1:
+                    prio_show = 15
+                    _range_note = f"（原值 {prio} 超出 Cisco 范围 1-15，已按最高优先级 15 生成，请按需调整）"
+            except (ValueError, TypeError):
+                prio_show = 15
+                _range_note = f"（原值 {prio} 非法，已按 15 生成）"
         lines = [
             (_view(vendor), "进入配置模式"),
             # StackWise 用专用堆叠线、端口无需配置——这是提示不是命令，
             # 放进 note，绝不占据 cmd 位（否则会被 to_plain 拼进下发配置）。
-            (f"switch {member} priority {prio}",
-             f"成员 {member} 优先级 {prio}（大的做主）；思科 StackWise 使用专用堆叠线，端口无需配置"),
+            (f"switch {member} priority {prio_show}",
+             f"成员 {member} 优先级 {prio_show}（大的做主）{_range_note}；思科 StackWise 使用专用堆叠线，端口无需配置"),
         ]
     lines.append(("save" if vendor in VRP else "write memory", "⚠ 堆叠成员重启后才生效，保存并协调好重启窗口"))
     return lines
@@ -188,20 +201,23 @@ def gen_nat(vendor, p):
     out_if = norm_port(vendor, p.get("out_if", ""))
     net, mask = p.get("src_net", ""), p.get("src_mask", "255.255.255.0")
     acl = p.get("acl_id", "2000")
-    if vendor in VRP:
-        acl_cmd = "acl number " + acl if vendor == "huawei" else "acl basic " + acl
-        return [
-            (_view(vendor), "进入系统视图"),
-            (acl_cmd, "创建基本 ACL 匹配内网源地址"),
-            (f" rule 5 permit source {net} {mask}", f"允许内网 {net} {mask} 做 NAT"),
-            (f"interface {out_if}", "进入公网出接口"),
-            (f" nat outbound {acl}", "匹配 ACL 的流量用出接口地址做转换"),
-        ]
+    # VRP 与 IOS 的基本 ACL 第三个参数都是反掩码（wildcard），不是子网掩码：
+    # 华为手册示例 `rule 5 permit source 192.168.1.0 0.0.0.255`。
+    # 原 VRP 分支直接拼子网掩码（255.255.255.0），语义相反；两分支统一转换。
     wild = _mask_to_wildcard(mask)
     if not wild:
         # 非法掩码不静默生成错误 ACL：给出明显提示，避免配出与意图不符的规则
         return [(_view(vendor), "进入配置模式"),
                 ("!", f"⚠ 内网掩码「{mask}」非法，未生成 NAT ACL；请填 255.255.255.0 形式的合法掩码")]
+    if vendor in VRP:
+        acl_cmd = "acl number " + acl if vendor == "huawei" else "acl basic " + acl
+        return [
+            (_view(vendor), "进入系统视图"),
+            (acl_cmd, "创建基本 ACL 匹配内网源地址"),
+            (f" rule 5 permit source {net} {wild}", f"允许内网 {net} {mask} 做 NAT（VRP 用反掩码）"),
+            (f"interface {out_if}", "进入公网出接口"),
+            (f" nat outbound {acl}", "匹配 ACL 的流量用出接口地址做转换"),
+        ]
     return [
         (_view(vendor), "进入配置模式"),
         (f"access-list {acl} permit {net} {wild}", f"允许内网 {net} 做 NAT（IOS 用反掩码）"),
@@ -261,14 +277,10 @@ def gen_stp(vendor, p):
 
 
 def _mask_to_wildcard(mask):
-    """点分掩码 → 反掩码；非法输入返回 None（不静默兜底成看似合法的值）。"""
-    try:
-        parts = [int(x) for x in str(mask).strip().split(".")]
-        if len(parts) != 4 or any(x < 0 or x > 255 for x in parts):
-            return None
-        return ".".join(str(255 - x) for x in parts)
-    except (ValueError, AttributeError):
-        return None
+    """点分掩码 → 反掩码；非法/不连续掩码返回 None（不静默兜底）。
+    复用公共实现，与配置体检 _mask_valid 口径一致。"""
+    from utils.net_addr import mask_to_wildcard
+    return mask_to_wildcard(mask)
 
 
 def _norm_mac(mac):

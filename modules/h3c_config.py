@@ -10,13 +10,14 @@ from typing import Dict, List, Optional, Any
 
 
 def _comware_timezone(timezone):
-    """`UTC+8`/`UTC-5` → Comware `clock timezone NAME {add|subtract} HOURS`。"""
-    s = str(timezone).strip()
-    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
-    if m:
-        name, sign, h = m.group(1), m.group(2), int(m.group(3))
-        return name, ("subtract" if sign == "-" else "add"), h
-    return (s.replace(" ", "_") or "UTC"), "add", 0
+    """`UTC+8`/`UTC-5` → Comware `clock timezone NAME {add|subtract} HOURS`。
+    解析复用公共函数，越界标 _CHECK 并回退 0。
+    """
+    from utils.net_addr import parse_timezone
+    name, hours, valid = parse_timezone(timezone)
+    if not valid:
+        return f"{name}_CHECK", "add", 0
+    return name, ("subtract" if hours < 0 else "add"), abs(hours)
 
 
 class H3CConfigGenerator:
@@ -377,7 +378,7 @@ class H3CConfigGenerator:
                             rule_line += f" source {src}"
                         if dst:
                             rule_line += f" destination {dst}"
-                        if sport and protocol.lower() in ("tcp", "udp"):
+                        if sport and (protocol or "").lower() in ("tcp", "udp"):
                             rule_line += f" source-port eq {sport}"
                         if dport:
                             rule_line += f" destination-port eq {dport}"

@@ -4,6 +4,7 @@
 系统设置模块
 """
 
+import copy
 import json
 import os
 import sys
@@ -59,11 +60,11 @@ class Settings:
                 with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
                     self._settings = json.load(f)
             else:
-                self._settings = DEFAULT_SETTINGS.copy()
+                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
                 self._save()
         except Exception as e:
             print(f"加载设置失败: {e}")
-            self._settings = DEFAULT_SETTINGS.copy()
+            self._settings = copy.deepcopy(DEFAULT_SETTINGS)
     
     def _save(self):
         """保存设置"""
@@ -92,7 +93,7 @@ class Settings:
     
     def reset(self):
         """重置为默认设置"""
-        self._settings = DEFAULT_SETTINGS.copy()
+        self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         self._save()
     
     def add_recent_file(self, filepath):

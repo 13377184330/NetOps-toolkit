@@ -46,18 +46,10 @@ LEVEL_COLOR = {"严重": "#FA5151", "警告": "#FA9D3B", "提示": "#7A8699"}
 
 
 def _mask_valid(mask: str) -> bool:
-    """掩码必须连续（255.255.255.0 合法，255.255.255.1 非法）"""
-    try:
-        parts = [int(x) for x in mask.split(".")]
-    except Exception:
-        return False
-    if len(parts) != 4 or any(p < 0 or p > 255 for p in parts):
-        return False
-    m = int.from_bytes(bytes(parts), "big")
-    inv = (~m) & 0xFFFFFFFF
-    if m == 0:
-        return False
-    return inv & (inv + 1) == 0
+    """掩码必须连续（255.255.255.0 合法，255.255.255.1 非法）。
+    与配置生成共用 utils.net_addr 的同一实现，避免口径漂移。"""
+    from utils.net_addr import mask_valid
+    return mask_valid(mask)
 
 
 def lint(text: str, vendor: str) -> dict:

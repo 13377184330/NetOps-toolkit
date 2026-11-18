@@ -8,13 +8,11 @@ from utils.net_addr import bgp_network_line
 
 
 def _tz_name_offset(timezone):
-    """`UTC+8`/`UTC-5` → (名称, 带符号小时)，供 IOS `clock timezone NAME HOURS`。"""
-    s = str(timezone).strip()
-    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
-    if m:
-        name, sign, h = m.group(1), m.group(2), int(m.group(3))
-        return name, -h if sign == "-" else h
-    return (s.replace(" ", "_") or "UTC"), 0
+    """`UTC+8`/`UTC-5` → (名称, 带符号小时)，供 IOS `clock timezone NAME HOURS`。
+    解析复用公共函数，越界标 _CHECK 并回退 0。"""
+    from utils.net_addr import parse_timezone
+    name, hours, valid = parse_timezone(timezone)
+    return (name if valid else f"{name}_CHECK"), (hours if valid else 0)
 
 
 class RuijieBasicGenerator:

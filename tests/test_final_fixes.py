@@ -179,6 +179,59 @@ qsrc = str(_Q.generate_acl_qos("3000", [{"id": 5, "protocol": "tcp", "source": "
                                          "source_port": 1234, "dest_port": 80, "dscp": 10}]))
 case("G5 QoS规则输出source-port", "source-port eq 1234" in qsrc, qsrc[:160])
 
+# ---- 第七轮：NAT 掩码反掩码 + 连续性校验 ----
+from modules.adv_modules import gen_nat, gen_stack
+vrp_nat = str(gen_nat("huawei", {"src_net": "192.168.10.0", "src_mask": "255.255.255.0",
+                                 "acl_id": "2000", "out_if": "GE0/1"}))
+case("H1 VRP NAT用反掩码(非子网掩码)",
+     "permit source 192.168.10.0 0.0.0.255" in vrp_nat
+     and "permit source 192.168.10.0 255.255.255.0" not in vrp_nat, vrp_nat[:200])
+bad_nat = str(gen_nat("huawei", {"src_net": "192.168.10.0", "src_mask": "255.0.255.0",
+                                 "acl_id": "2000", "out_if": "GE0/1"}))
+case("H1b 不连续掩码被拦截", "掩码" in bad_nat and "permit source" not in bad_nat,
+     bad_nat[:120])
+from utils.net_addr import mask_valid, mask_to_wildcard
+case("H1c 掩码校验口径统一",
+     mask_valid("255.255.255.0") and not mask_valid("255.0.255.0")
+     and mask_to_wildcard("1.2.3.4") is None)
+
+# ---- 第七轮：h3c protocol=None 不崩 ----
+from modules.h3c_config import H3CConfigGenerator as _H
+try:
+    _H.generate_security_config({"acls": [{"number": 3000, "rules": [
+        {"action": "permit", "source": "1.1.1.0", "source_port": 80, "protocol": None}]}]})
+    case("H2 protocol=None不崩溃", True)
+except Exception as e:
+    case("H2 protocol=None不崩溃", False, repr(e))
+
+# ---- 第七轮：思科堆叠优先级范围 ----
+cisco_stack = str(gen_stack("cisco", {"member": "1", "priority": "150"}))
+case("H3 思科堆叠优先级钳制到<=15",
+     "priority 150" not in cisco_stack and "priority 15" in cisco_stack
+     and "1-15" in cisco_stack, cisco_stack[:200])
+
+# ---- 第七轮：settings 浅拷贝污染 ----
+import utils.settings as _sm
+_d = tempfile.mkdtemp(); _orig_sf = _sm.SETTINGS_FILE
+_sm.SETTINGS_FILE = os.path.join(_d, "s.json")
+try:
+    _s = _sm.Settings(); _s.add_recent_file("HOST_A")
+    _s.reset()
+    case("H4 reset真正恢复默认(不污染DEFAULT)",
+         _s.get_recent_files() == [] and _sm.DEFAULT_SETTINGS.get("recent_files") == [],
+         f"reset后={_s.get_recent_files()} DEFAULT={_sm.DEFAULT_SETTINGS.get('recent_files')}")
+finally:
+    _sm.SETTINGS_FILE = _orig_sf; shutil.rmtree(_d, ignore_errors=True)
+
+# ---- 第七轮：时区越界统一标记 ----
+from modules.cisco_config import _parse_timezone as _p1
+from modules.basic_config import _vrp_timezone as _p2
+from modules.h3c_config import _comware_timezone as _p3
+from modules.maipu_config import _tz_name_offset as _p4
+case("H5 时区解析越界统一标_CHECK",
+     all("_CHECK" in str(f("UTC+99")[0]) and f("UTC+8")[0] == "UTC"
+         for f in (_p1, _p2, _p3, _p4)))
+
 n_pass = sum(1 for _, ok, _ in results if ok)
 print("\n" + "=" * 68)
 print(f"最终轮修复定向回归: PASS {n_pass} / FAIL {len(results) - n_pass}")

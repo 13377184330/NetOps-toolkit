@@ -173,7 +173,7 @@ app.processEvents()
 print("\n[③ 备份中心] 临时仓库 → 设备聚合/操作人/勾选对比提示")
 from gui.tools.backup_center_tool import BackupCenterWidget
 import utils.backup_manager as bm
-mw = MainWindow() if False else win
+mw = win
 bc = BackupCenterWidget()
 # 隔离注入（组件读默认目录，模拟用户场景改为注入测试数据）
 tmpdir2 = tempfile.mkdtemp(prefix="bc_gui2_")

@@ -70,8 +70,7 @@ for r in range(w.table.rowCount()):
     if qb:
         chk_rows.append((r, qb))
 # 时间序：row0 最新（v3），row2 最旧（v1）→ 勾 v1 和 v3
-chk_rows[2][1].setCheckState(2 if hasattr(chk_rows[2][1], 'setCheckState') else 0) \
-    if False else chk_rows[2][1].setChecked(True)
+chk_rows[2][1].setChecked(True)
 app.processEvents()
 chk_rows[0][1].setChecked(True)
 app.processEvents()
