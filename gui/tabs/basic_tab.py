@@ -122,7 +122,7 @@ class BasicConfigTab(QWidget):
         user_layout.addRow("用户名:", self.username_input)
         
         self.user_password_input = QLineEdit()
-        self.user_password_input.setText("Admin@123")
+        self.user_password_input.setText("TODO_SET_PASSWORD")
         self.user_password_input.setEchoMode(QLineEdit.Password)
         user_layout.addRow("用户密码:", self.user_password_input)
         
@@ -383,7 +383,7 @@ class BasicConfigTab(QWidget):
         self.enable_telnet.setChecked(False)
         
         self.username_input.setText("admin")
-        self.user_password_input.setText("Admin@123")
+        self.user_password_input.setText("TODO_SET_PASSWORD")
         self.privilege_level.setValue(15)
         self.user_encrypted.setChecked(False)
         

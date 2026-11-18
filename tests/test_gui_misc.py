@@ -46,12 +46,18 @@ def _rec(parent, kind, title, text, buttons, default_role=None):
     return buttons[0][0]
 dlg_base._styled_box = _rec
 
-# QInputDialog patch：AI 卡片编辑弹原生输入框，模拟用户改命令
+# QInputDialog patch：AI 卡片编辑历史上弹原生输入框，模拟用户改命令
 edit_inputs = []
 _orig_getText = QInputDialog.getText
 def _fake_gettext(parent, title, label, echo=0, text=""):
     return (edit_inputs.pop(0) if edit_inputs else text), True
 QInputDialog.getText = _fake_gettext
+
+# 2026-11-18：✎ 就地编辑已改用统一 input_box（BaseDialog 模态框）。
+# 不 patch 的话无头环境点 ✎ 会进真实 exec_() 模态循环而挂起。
+def _fake_input(parent, title, label, text="", placeholder=None, subtitle=""):
+    return (edit_inputs.pop(0) if edit_inputs else text), True
+dlg_base.input_box = _fake_input
 
 from gui import theme as _theme
 _theme.install()

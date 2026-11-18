@@ -48,9 +48,22 @@ def _load_or_create_key() -> bytes:
         # 现有密钥：校正权限（历史遗留的宽权限文件也一并收紧）
         _lock_permissions(_KEY_FILE)
         with open(_KEY_FILE, "rb") as f:
-            return f.read().strip()
+            key = f.read().strip()
+        # 损坏的密钥（磁盘满/写入中断/手工误改）若在导入期直接交给
+        # Fernet() 会抛 ValueError，导致整个设备模块链无法导入。
+        # 校验失败则备份坏文件并重新生成（旧密文将不可解，需告知用户）。
+        try:
+            Fernet(key)
+            return key
+        except (ValueError, TypeError):
+            # 坏密钥：备份后 fall-through 到下方统一的新密钥生成/落盘路径
+            try:
+                import shutil
+                shutil.move(_KEY_FILE, _KEY_FILE + ".corrupt")
+            except OSError:
+                pass
 
-    # 创建新密钥
+    # 创建新密钥（首次创建，或坏密钥备份后重建）——只在此处生成一次
     key = Fernet.generate_key()
 
     # 类 Unix：用 os.open 的 mode 直接以 0o600 原子创建；Windows：mode 参数被忽略，稍后 ACL 收紧

@@ -19,6 +19,16 @@ except ImportError:  # 直接运行本文件做自测时，把项目根目录补
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from modules.config_visualizer import expand_vlan_body
 
+# ACL 定义行：覆盖 VRP `acl (basic|advanced|number) N`（也兼容 `acl N` 简写）
+# 与 IOS `access-list N` / `ip access-list (extended|standard) N|名称`。
+# 捕获组 1 = ACL 标识（编号或名称），供 acl_refs 的引用一致性核对。
+# 锚定行首，避免把注释/描述里出现的 "acl" 字样误当定义。
+_ACL_DEF_RE = re.compile(
+    r"^\s*(?:acl\s+(?:(?:basic|advanced|number)\s+)?([\w-]+)"
+    r"|(?:ip\s+)?access-list\s+(?:(?:extended|standard)\s+)?([\w-]+))",
+    re.I,
+)
+
 VRP = ("huawei", "h3c")
 IOS = ("ruijie", "maipu", "cisco")
 
@@ -129,13 +139,19 @@ def lint(text: str, vendor: str) -> dict:
             continue
 
         # ACL
-        m = re.search(r"\bacl\s+(?:basic\s+|number\s+|advanced\s+)?(\d+)", low)
-        if m and cur_iface is None:
-            acl_defined.add(m.group(1))
-            continue
-        m = re.search(r"(?:packet-filter|traffic-filter|ip\s+access-group)\s+(?:acl\s+)?(\d+)", low)
+        # ACL 定义收集与「是否处于接口视图」无关：配置里 ACL 段常排在接口段
+        # 之后，原实现限制 `cur_iface is None`（仅首个接口块之前）才收集，
+        # 而 cur_iface 进入接口块后永不复位，导致后置 ACL 漏收、被误报为
+        # 「接口引用了不存在的 ACL」。去掉该条件，主循环一遍扫描即可。
+        # 正则同时覆盖两种语法：VRP `acl (basic|advanced|number) N` 与
+        # IOS `access-list N` / `ip access-list (extended|standard) NAME`。
+        m = _ACL_DEF_RE.search(low)
         if m:
-            acl_refs.setdefault(m.group(1), []).append(i)
+            acl_defined.add((m.group(1) or m.group(2)).lower())
+            continue
+        m = re.search(r"(?:packet-filter|traffic-filter|ip\s+access-group)\s+(?:acl\s+)?([\w-]+)", low)
+        if m:
+            acl_refs.setdefault(m.group(1).lower(), []).append(i)
 
         # 登录/用户
         if re.search(r"^(?:stelnet|ssh)\s+server\s+enable", low):

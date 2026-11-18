@@ -24,7 +24,7 @@ FIELDS = [
     ("mask", "子网掩码", "255.255.255.0"),
     ("gw", "默认网关", "10.10.3.1"),
     ("user", "管理员账号", "admin"),
-    ("pwd", "管理员密码", "Admin@123"),
+    ("pwd", "管理员密码", "TODO_SET_PASSWORD"),
     ("ntp", "NTP 服务器（可空）", "10.10.0.10"),
     ("syslog", "日志服务器（可空）", "10.10.0.11"),
 ]
@@ -37,7 +37,7 @@ def build(vendor, p):
     ip, mask = p.get("ip", "").strip(), p.get("mask", "").strip() or "255.255.255.0"
     gw = p.get("gw", "").strip()
     user = p.get("user", "").strip() or "admin"
-    pwd = p.get("pwd", "").strip() or "Admin@123"
+    pwd = p.get("pwd", "").strip() or "TODO_SET_PASSWORD"
     ntp, syslog = p.get("ntp", "").strip(), p.get("syslog", "").strip()
     vrp = vendor in ("huawei", "h3c")
 

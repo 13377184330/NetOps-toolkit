@@ -36,13 +36,28 @@ for w, expect in [("0.0.0.255", True), ("255.255.255.0", True),
 
 from utils.audit_manager import AuditManager
 from datetime import datetime, timedelta
-am = AuditManager()
-# get_statistics(days=N) 应只统计近 N 天；days=0 只统计今天。
-# 用 days=30 与 days=0 对比，若 days 生效则前者范围 >= 后者
-s30 = am.get_statistics(days=30)
-s0 = am.get_statistics(days=0)
-case("M4 审计 days 参数生效", isinstance(s30, dict) and isinstance(s0, dict),
-     f"30天keys={list(s30)[:3]}")
+import tempfile, shutil
+# 真正的 days 行为断言：构造一条今天 + 一条 10 天前的日志，
+# days=0 应只统计今天(1)，days=30 应两条都算(2)。
+# 之前的假绿只 assert 返回是 dict，恒真、测不到 days 是否生效。
+_d = tempfile.mkdtemp()
+am = AuditManager(audit_dir=_d)
+try:
+    from utils.audit_manager import AuditLog
+    today = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    old = (datetime.now() - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    def _mk(ts):
+        return AuditLog(id=ts, timestamp=ts, action="工具使用", level="信息",
+                        user="u", device_name="", device_type="", description="",
+                        details={}, ip_address="", session_id="s", result="成功", duration_ms=0)
+    am.logs = [_mk(today), _mk(old)]
+    s0 = am.get_statistics(days=0)
+    s30 = am.get_statistics(days=30)
+    case("M4 审计 days 参数生效",
+         s0["recent_count"] == 1 and s30["recent_count"] == 2,
+         f"days0={s0['recent_count']} days30={s30['recent_count']}")
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
 
 from modules.basic_config import BasicConfigGenerator as B
 snmp = B.generate_snmp_config(version="v2c", sys_name="SW-CORE")

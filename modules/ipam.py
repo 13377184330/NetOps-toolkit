@@ -16,12 +16,19 @@ IPAM_FILE = os.path.join(app_root(), "config", "ipam.json")
 
 
 def _load():
-    try:
-        if os.path.exists(IPAM_FILE):
+    if os.path.exists(IPAM_FILE):
+        try:
             with open(IPAM_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except Exception:
-        pass
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # 账本损坏（写入中断/手工误改）绝不能静默当成空账本——那样
+            # 下一次 _save 会用空数据覆盖原文件，用户的所有登记全部丢失。
+            # 备份坏文件后返回空账本，让用户有机会从 .corrupt 找回数据。
+            try:
+                import shutil
+                shutil.move(IPAM_FILE, IPAM_FILE + ".corrupt")
+            except OSError:
+                pass
     return {"subnets": []}
 
 
@@ -94,13 +101,16 @@ def mark_ip(cidr: str, ip: str, note: str = "") -> dict:
     except ValueError:
         return {"ok": False, "error": f"IP 格式不正确：{ip}"}
     ip_s = str(addr)
-    for u in rec["used"]:
-        if u["ip"] == ip_s:
-            u["note"] = note.strip() or u["note"]
+    # 损坏/旧格式的记录可能缺 used 键，list_subnets 用 .get 保护了读路径，
+    # 写路径也必须同样容错，否则点「标记已用」直接 KeyError 崩 UI。
+    used_list = rec.setdefault("used", [])
+    for u in used_list:
+        if u.get("ip") == ip_s:
+            u["note"] = note.strip() or u.get("note", "")
             _save(data)
             return {"ok": True, "record": rec, "updated": True}
-    rec["used"].append({"ip": ip_s, "note": note.strip(),
-                        "at": datetime.now().strftime("%Y-%m-%d %H:%M")})
+    used_list.append({"ip": ip_s, "note": note.strip(),
+                      "at": datetime.now().strftime("%Y-%m-%d %H:%M")})
     _save(data)
     return {"ok": True, "record": rec}
 
@@ -111,8 +121,8 @@ def unmark_ip(cidr: str, ip: str) -> bool:
     rec = next((s for s in data["subnets"] if s["subnet"] == net), None)
     if rec is None:
         return False
-    before = len(rec["used"])
-    rec["used"] = [u for u in rec["used"] if u["ip"] != (ip or "").strip()]
+    before = len(rec.get("used", []))
+    rec["used"] = [u for u in rec.get("used", []) if u.get("ip") != (ip or "").strip()]
     if len(rec["used"]) < before:
         _save(data)
         return True
@@ -126,7 +136,7 @@ def suggest_free(cidr: str) -> str:
     rec = next((s for s in data["subnets"] if s["subnet"] == net), None)
     if rec is None:
         return ""
-    used = {u["ip"] for u in rec["used"]}
+    used = {u.get("ip") for u in rec.get("used", [])}
     # 惰性遍历，找到第一个未用 IP 即返回。原实现 `list(network.hosts())`
     # 会把 /8 的 1600 万个主机一次性物化（7s+ 卡顿 / 高内存 / 可能 OOM）。
     for idx, h in enumerate(ipaddress.ip_network(net).hosts()):

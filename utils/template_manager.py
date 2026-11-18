@@ -70,7 +70,7 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Access-SW-01",
-                    "password": {"value": "Admin@123", "encrypted": True},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                     "mgmt_interface": {
                         "interface": "Vlanif1",
                         "ip_address": "192.168.1.1",
@@ -78,7 +78,7 @@ class TemplateManager:
                         "gateway": "192.168.1.254"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "Admin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 },
                 "vlan": {
                     "vlans": [{"id": 1, "name": "Management"}, {"id": 10, "name": "Sales"}]
@@ -90,14 +90,14 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Core-SW-01",
-                    "password": {"value": "CoreAdmin@123", "encrypted": True},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                     "mgmt_interface": {
                         "interface": "Vlanif1",
                         "ip_address": "10.0.0.1",
                         "mask": "255.255.255.0"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "CoreAdmin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         },
@@ -106,9 +106,9 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Agg-SW-01",
-                    "password": {"value": "AggAdmin@123", "encrypted": True},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "AggAdmin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         }
@@ -120,7 +120,7 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Access-SW-01",
-                    "password": {"value": "Admin@123", "encrypted": True},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                     "mgmt_interface": {
                         "interface": "Vlan-interface1",
                         "ip_address": "192.168.1.1",
@@ -128,7 +128,7 @@ class TemplateManager:
                         "gateway": "192.168.1.254"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "Admin@123", "level": 3}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 3}
                 }
             }
         },
@@ -137,14 +137,14 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Core-SW-01",
-                    "password": {"value": "CoreAdmin@123", "encrypted": True},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                     "mgmt_interface": {
                         "interface": "Vlan-interface1",
                         "ip_address": "10.0.0.1",
                         "mask": "255.255.255.0"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "CoreAdmin@123", "level": 3}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 3}
                 }
             }
         }
@@ -156,7 +156,7 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Ruijie-Access-SW-01",
-                    "password": {"value": "Admin@123", "encrypted": False},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": False},
                     "mgmt_interface": {
                         "interface": "vlan 1",
                         "ip_address": "192.168.1.1",
@@ -164,7 +164,7 @@ class TemplateManager:
                         "gateway": "192.168.1.254"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "Admin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         },
@@ -173,9 +173,9 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Ruijie-Core-SW-01",
-                    "password": {"value": "CoreAdmin@123", "encrypted": False},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": False},
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "CoreAdmin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         }
@@ -187,7 +187,7 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Maipu-Access-SW-01",
-                    "password": {"value": "Admin@123", "encrypted": False},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": False},
                     "mgmt_interface": {
                         "interface": "vlan 1",
                         "ip_address": "192.168.1.1",
@@ -195,7 +195,7 @@ class TemplateManager:
                         "gateway": "192.168.1.254"
                     },
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "Admin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         },
@@ -204,9 +204,9 @@ class TemplateManager:
             "config": {
                 "basic": {
                     "hostname": "Maipu-Core-SW-01",
-                    "password": {"value": "CoreAdmin@123", "encrypted": False},
+                    "password": {"value": "TODO_SET_PASSWORD", "encrypted": False},
                     "enable_ssh": True,
-                    "user": {"username": "admin", "password": "CoreAdmin@123", "level": 15}
+                    "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
                 }
             }
         }

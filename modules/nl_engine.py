@@ -9,6 +9,10 @@
 
 import re
 
+# 意图构建被容错吞掉时记录在此，供排查「说了却没生成命令」的问题。
+# 保留容错（用户说错话不该让引擎崩），但不再静默丢弃根因。
+LAST_PARSE_ERRORS = []
+
 VENDORS = ("huawei", "h3c", "ruijie", "maipu", "cisco")
 VENDOR_CN = {"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷",
              "maipu": "迈普", "cisco": "思科"}
@@ -406,7 +410,7 @@ INTENTS = [
     {"key": "login",
      "match": lambda s, c: re.search(r"ssh|telnet|远程登录|远程管理|开启登录|管理登录|账号|账户|登录名|创建用户|建用户|console\s*密码|串口密码", s, re.I),
      "build": lambda s, c, v: _ok(e_login(v, re.search(r"(?:账号|账户|用户名?|登录名|user)\s*[:：]?\s*([A-Za-z0-9_\-]+)", s, re.I).group(1) if re.search(r"账号|账户|用户名|登录名", s, re.I) else "admin",
-                                  re.search(r"(?:密码|口令|password|pwd)\s*[:：]?\s*([A-Za-z0-9_@#.\-]+)", s, re.I).group(1) if re.search(r"密码|口令|password|pwd", s, re.I) else "Admin@123",
+                                  re.search(r"(?:密码|口令|password|pwd)\s*[:：]?\s*([A-Za-z0-9_@#.\-]+)", s, re.I).group(1) if re.search(r"密码|口令|password|pwd", s, re.I) else "TODO_SET_PASSWORD",
                                   ssh=not re.search(r"关闭|禁用|不要|别开|关掉", s) and (not re.search(r"telnet", s, re.I) or re.search(r"ssh", s, re.I)),
                                   telnet=bool(re.search(r"telnet", s, re.I))), "远程登录")},
 
@@ -475,10 +479,14 @@ def _ok(lines, intent):
 
 # ---------------------------------------------------------------- 复杂意图的 build
 def _build_acl(s, c, v):
-    ips = _ips(s) or _ips(c)
-    if not ips:
-        return None
+    # IP 可能出现在上一分句（如「管理地址192.168.1.1，禁止访问」）。
+    # 原实现用 _ips(c) 判定有 IP，却只从当前句 _ip_mask(s) 取源地址，
+    # 导致生成 `rule 10 deny ip source  ` 这种空源/空掩码非法命令。
     m = _ip_mask(s)
+    if not m.get("ip"):
+        m = _ip_mask(c)
+    if not m.get("ip"):
+        return None
     src, mask = m["ip"], m["mask"]
     act = "deny" if re.search(r"拒绝|deny|封|拦|屏蔽|阻止|不许|不让|不能访问|禁止", s, re.I) else "permit"
     port = _ports(s)[0] if _ports(s) else ""
@@ -595,7 +603,10 @@ def parse(text: str, vendor: str):
                     if built:
                         hit, hit_key = built, it["key"]
                         break
-            except Exception:
+            except Exception as exc:
+                # 保留容错语义，但记录被吞的错误：否则 build 里的 bug
+                # （如 re.search(...).group(1) 未判空）会静默让意图消失。
+                LAST_PARSE_ERRORS.append((it["key"], seg, repr(exc)))
                 continue
         if hit:
             # 路由去重（分句可能重复命中）

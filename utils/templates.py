@@ -10,7 +10,7 @@ TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Access-SW-01",
-                "password": {"value": "Admin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlanif1",
                     "ip_address": "192.168.1.1",
@@ -21,7 +21,7 @@ TEMPLATES = {
                 "enable_telnet": False,
                 "user": {
                     "username": "admin",
-                    "password": "Admin@123",
+                    "password": "TODO_SET_PASSWORD",
                     "level": 15,
                     "encrypted": True
                 }
@@ -53,7 +53,7 @@ TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Core-SW-01",
-                "password": {"value": "CoreAdmin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlanif1",
                     "ip_address": "10.0.0.1",
@@ -62,7 +62,7 @@ TEMPLATES = {
                 "enable_ssh": True,
                 "user": {
                     "username": "admin",
-                    "password": "CoreAdmin@123",
+                    "password": "TODO_SET_PASSWORD",
                     "level": 15,
                     "encrypted": True
                 },
@@ -126,7 +126,7 @@ TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "PoE-SW-01",
-                "password": {"value": "PoeAdmin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlanif1",
                     "ip_address": "192.168.1.10",
@@ -135,7 +135,7 @@ TEMPLATES = {
                 "enable_ssh": True,
                 "user": {
                     "username": "admin",
-                    "password": "PoeAdmin@123",
+                    "password": "TODO_SET_PASSWORD",
                     "level": 15,
                     "encrypted": True
                 }
@@ -235,7 +235,7 @@ TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Aggregation-SW-01",
-                "password": {"value": "AggAdmin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlanif999",
                     "ip_address": "172.16.1.1",
@@ -244,7 +244,7 @@ TEMPLATES = {
                 "enable_ssh": True,
                 "user": {
                     "username": "admin",
-                    "password": "AggAdmin@123",
+                    "password": "TODO_SET_PASSWORD",
                     "level": 15,
                     "encrypted": True
                 },

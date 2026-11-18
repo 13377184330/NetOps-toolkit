@@ -36,19 +36,25 @@ try:
 except Exception as e:
     case("U3 含非法前缀配置转换不崩溃", False, repr(e))
 
-from modules.ipam import suggest_free, list_subnets
-import ipaddress
-t0 = time.time()
-# 修复后 suggest_free 内部是惰性遍历（enumerate(hosts) 取第一个未用）。
-# 直接验证等价的惰性取值在 /8 上毫秒级返回；若是旧的 list(hosts) 会耗时数秒。
-first = None
-for idx, h in enumerate(ipaddress.ip_network("10.0.0.0/8").hosts()):
-    if idx == 1:  # idx0 网关位，idx1 为第一个建议 IP
-        first = str(h)
-        break
-elapsed = time.time() - t0
-case("U4 大网段惰性取可用IP(无全量物化)", first == "10.0.0.2" and elapsed < 2.0,
-     f"首IP={first} 耗时={elapsed:.2f}s")
+import modules.ipam as _ipam
+import tempfile, shutil
+# 真正调用被测函数 suggest_free（此前的假绿：只重写了一遍惰性循环，
+# 从未触碰被测函数）。隔离到临时账本，登记 /8 后计时；若有人改回
+# list(network.hosts()) 全量物化，这里会耗时数秒 → 超时失败。
+_d = tempfile.mkdtemp()
+_orig_file = _ipam.IPAM_FILE
+_ipam.IPAM_FILE = os.path.join(_d, "ipam.json")
+try:
+    _ipam.add_subnet("10.0.0.0/8", name="test")
+    t0 = time.time()
+    first = _ipam.suggest_free("10.0.0.0/8")
+    elapsed = time.time() - t0
+    case("U4 大网段惰性取可用IP(无全量物化)",
+         first == "10.0.0.2" and elapsed < 2.0,
+         f"首IP={first} 耗时={elapsed:.2f}s")
+finally:
+    _ipam.IPAM_FILE = _orig_file
+    shutil.rmtree(_d, ignore_errors=True)
 
 from utils.templates import TEMPLATES
 import json
@@ -72,10 +78,14 @@ try:
         for _ in range(3):
             assert sc._sync(noop()) == 42
         sc._ensure_loop = orig
-        case("U6 SNMP loop 用完即关闭", all(lp.is_closed() for lp in loops),
-             f"closed={[lp.is_closed() for lp in loops]}")
+        # 必须断言调用次数：否则实现改成根本不建 loop 时 loops=[]，
+        # all([]) 恒真会造成假绿。
+        case("U6 SNMP loop 用完即关闭",
+             len(loops) == 3 and all(lp.is_closed() for lp in loops),
+             f"调用{len(loops)}次 closed={[lp.is_closed() for lp in loops]}")
     else:
-        case("U6 SNMP loop 用完即关闭（pysnmp未装，跳过）", True)
+        # 本机未装 pysnmp：明确标 SKIP，不计入 PASS（避免"跳过伪装成通过"）
+        print("  SKIP  U6 SNMP loop（pysnmp 未安装，无法验证）")
 except Exception as e:
     case("U6 SNMP loop 用完即关闭", False, repr(e))
 

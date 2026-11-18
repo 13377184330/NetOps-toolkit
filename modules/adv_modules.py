@@ -76,8 +76,10 @@ def gen_stack(vendor, p):
     else:
         lines = [
             (_view(vendor), "进入配置模式"),
-            (f"switch {member} priority {prio}", f"成员 {member} 优先级 {prio}（大的做主）"),
-            ("（StackWise 使用专用堆叠线，端口无需配置）", "思科通过堆叠线缆连接，仅需设置优先级"),
+            # StackWise 用专用堆叠线、端口无需配置——这是提示不是命令，
+            # 放进 note，绝不占据 cmd 位（否则会被 to_plain 拼进下发配置）。
+            (f"switch {member} priority {prio}",
+             f"成员 {member} 优先级 {prio}（大的做主）；思科 StackWise 使用专用堆叠线，端口无需配置"),
         ]
     lines.append(("save" if vendor in VRP else "write memory", "⚠ 堆叠成员重启后才生效，保存并协调好重启窗口"))
     return lines
@@ -151,13 +153,18 @@ def gen_dhcp_relay(vendor, p):
             (" dhcp select relay", "接口工作在中继模式"),
             (f" dhcp relay server-address {server}", f"指向 DHCP 服务器 {server}"),
         ]
-    return [
+    is_svi = bool(re.match(r"^Vlan", ifn, re.I))
+    lines = [
         (_view(vendor), "进入配置模式"),
-        (f"interface {ifn}", "进入客户端网关接口"),
-        (" no switchport" if not re.match(r"^Vlan", ifn, re.I) else "（SVI 接口无需此步）",
-         "确保为三层接口"),
-        (f" ip helper-address {server}", f"指向 DHCP 服务器 {server}"),
+        (f"interface {ifn}",
+         "进入客户端网关接口" + ("（SVI 已是三层接口，无需 no switchport）" if is_svi else "")),
     ]
+    # 仅物理口需要 no switchport；SVI 不能执行该命令。此前把中文说明
+    # 「（SVI 接口无需此步）」放在 cmd 位，会被拼进下发配置成为非法命令。
+    if not is_svi:
+        lines.append((" no switchport", "确保为三层接口"))
+    lines.append((f" ip helper-address {server}", f"指向 DHCP 服务器 {server}"))
+    return lines
 
 
 def gen_vrrp(vendor, p):
