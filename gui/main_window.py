@@ -305,6 +305,9 @@ class MainWindow(QMainWindow):
         # self.tab_widget.setStyleSheet(NAV_QSS)
         self.tab_widget._nav.setStyleSheet(NAV_QSS)
         self.tab_widget.select_first()  # 默认选中第一页（导航高亮）
+        # 侧导航底部状态卡片：推初始状态 + 接工具箱快捷入口
+        self.tab_widget.tools_clicked.connect(self.open_tools_window)
+        self._refresh_nav_status()
         
         self._clean_config = ""  # 最近一次生成的纯命令（注释另加，见 cmd_notes）
         
@@ -521,6 +524,8 @@ class MainWindow(QMainWindow):
         # 配置操作按钮行
         if hasattr(self, "_config_tools_widget"):
             self._config_tools_widget.setVisible(not full_width)
+        # 设备数量可能在设备运维页被增删，切页时同步导航卡片
+        self._refresh_nav_status()
 
     def _toggle_comments(self, checked: bool):
         """命令释义开关：切换预览渲染方式"""
@@ -782,6 +787,20 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
     
+    def _refresh_nav_status(self):
+        """侧导航底部状态卡：当前厂商 + 已登记设备数"""
+        vendor_cn = {"huawei": "华为 Huawei", "h3c": "华三 H3C", "ruijie": "锐捷 Ruijie",
+                     "maipu": "迈普 Maipu", "cisco": "思科 Cisco"}
+        count = 0
+        try:
+            from utils.device_store import DeviceStore
+            count = len(DeviceStore().list_all())
+        except Exception:
+            pass
+        self.tab_widget.set_status(
+            vendor=vendor_cn.get(getattr(self, "current_device_type", "huawei"), "华为 Huawei"),
+            device_count=count)
+
     def on_device_changed(self, index):
         """设备类型切换"""
         device_types = ["huawei", "h3c", "ruijie", "maipu", "cisco"]
@@ -811,7 +830,8 @@ class MainWindow(QMainWindow):
         self._clean_config = ""
         
         self.statusBar().showMessage(f"已切换到{name}模式", 3000)
-    
+        self._refresh_nav_status()
+
     def open_network_tool(self, tool_name):
         """打开单个网络工具"""
         from gui.tools.subnet_tool import SubnetCalculatorWidget
