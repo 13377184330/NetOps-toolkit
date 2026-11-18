@@ -415,12 +415,25 @@ class NetworkInfo:
 
 class IPAddressConverter:
     """IP地址转换工具"""
-    
+
+    @staticmethod
+    def _parse_ipv4(ip: str) -> list:
+        """严格解析 IPv4：必须 4 段、每段 0-255，否则 ValueError。
+
+        原实现不校验，`999.1.1.1` 会假成功，`300.1.1.1` 二进制段溢出成 9 位。
+        """
+        parts = [int(x) for x in str(ip).strip().split('.')]
+        if len(parts) != 4:
+            raise ValueError("IPv4 必须为 4 段")
+        if any(p < 0 or p > 255 for p in parts):
+            raise ValueError("IPv4 每段必须在 0-255")
+        return parts
+
     @staticmethod
     def ip_to_decimal(ip: str) -> Dict:
         """IP地址转十进制"""
         try:
-            parts = [int(x) for x in ip.split('.')]
+            parts = IPAddressConverter._parse_ipv4(ip)
             decimal = (parts[0] << 24) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
             return {
                 "success": True,
@@ -441,6 +454,8 @@ class IPAddressConverter:
         """十进制转IP地址"""
         try:
             decimal = int(decimal)
+            if decimal < 0 or decimal > 0xFFFFFFFF:
+                raise ValueError("十进制值必须在 0-4294967295")
             ip = f"{(decimal >> 24) & 255}.{(decimal >> 16) & 255}.{(decimal >> 8) & 255}.{decimal & 255}"
             return {
                 "success": True,
@@ -460,7 +475,7 @@ class IPAddressConverter:
     def ip_to_binary(ip: str) -> Dict:
         """IP地址转二进制"""
         try:
-            parts = [int(x) for x in ip.split('.')]
+            parts = IPAddressConverter._parse_ipv4(ip)
             binary_parts = [bin(p)[2:].zfill(8) for p in parts]
             binary_str = ''.join(binary_parts)
             

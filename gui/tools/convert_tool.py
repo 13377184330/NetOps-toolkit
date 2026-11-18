@@ -128,7 +128,15 @@ class ConvertWidget(QWidget):
             return
         src = self.src_combo.currentData()
         dst = self.dst_combo.currentData()
-        r = cc.convert(text, src, dst)
+        try:
+            r = cc.convert(text, src, dst)
+        except Exception as exc:
+            # 用户粘贴的配置千奇百怪（非法掩码/前缀、畸形行），转换异常不应
+            # 直接抛到 GUI 主线程导致功能失效，给出可读提示即可。
+            self.report_label.setText(f"转换失败：配置含无法解析的内容（{type(exc).__name__}）")
+            self.output_view.setHtml("<div>（无输出）</div>")
+            self.detect_label.setText("源厂商识别：—")
+            return
         self.detect_label.setText(
             f"源厂商识别：{VENDOR_CN.get(r['src_detected'], r['src_detected'])}"
             + ("" if src != "auto" else "（自动检测，可手动纠正）"))

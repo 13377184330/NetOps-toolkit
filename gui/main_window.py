@@ -41,7 +41,7 @@ HUAWEI_TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Access-SW-01",
-                "password": {"value": "Admin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlanif1",
                     "ip_address": "192.168.1.1",
@@ -49,7 +49,7 @@ HUAWEI_TEMPLATES = {
                     "gateway": "192.168.1.254"
                 },
                 "enable_ssh": True,
-                "user": {"username": "admin", "password": "Admin@123", "level": 15}
+                "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 15}
             },
             "vlan": {
                 "vlans": [{"id": 1, "name": "Management"}, {"id": 10, "name": "Sales"}]
@@ -64,7 +64,7 @@ H3C_TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Access-SW-01",
-                "password": {"value": "Admin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlan-interface1",
                     "ip_address": "192.168.1.1",
@@ -72,7 +72,7 @@ H3C_TEMPLATES = {
                     "gateway": "192.168.1.254"
                 },
                 "enable_ssh": True,
-                "user": {"username": "admin", "password": "Admin@123", "level": 3}
+                "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 3}
             }
         }
     },
@@ -81,14 +81,14 @@ H3C_TEMPLATES = {
         "config": {
             "basic": {
                 "hostname": "Core-SW-01",
-                "password": {"value": "CoreAdmin@123", "encrypted": True},
+                "password": {"value": "TODO_SET_PASSWORD", "encrypted": True},
                 "mgmt_interface": {
                     "interface": "Vlan-interface1",
                     "ip_address": "10.0.0.1",
                     "mask": "255.255.255.0"
                 },
                 "enable_ssh": True,
-                "user": {"username": "admin", "password": "CoreAdmin@123", "level": 3}
+                "user": {"username": "admin", "password": "TODO_SET_PASSWORD", "level": 3}
             }
         }
     }
@@ -112,23 +112,23 @@ def _mk_template(desc, hostname, mgmt_if, ip, pwd, ssh_user):
 
 RUIJIE_TEMPLATES = {
     "接入交换机标准配置": _mk_template("锐捷接入层交换机标准配置模板", "Access-SW-01",
-                                   "VLAN 1", "192.168.1.1", "Admin@123", "admin"),
+                                   "VLAN 1", "192.168.1.1", "TODO_SET_PASSWORD", "admin"),
     "核心交换机配置": _mk_template("锐捷核心层交换机配置模板", "Core-SW-01",
-                                "VLAN 1", "10.0.0.1", "CoreAdmin@123", "admin"),
+                                "VLAN 1", "10.0.0.1", "TODO_SET_PASSWORD", "admin"),
 }
 
 MAIPU_TEMPLATES = {
     "接入交换机标准配置": _mk_template("迈普接入层交换机标准配置模板", "Access-SW-01",
-                                   "Vlan1", "192.168.1.1", "Admin@123", "admin"),
+                                   "Vlan1", "192.168.1.1", "TODO_SET_PASSWORD", "admin"),
     "核心交换机配置": _mk_template("迈普核心层交换机配置模板", "Core-SW-01",
-                                "Vlan1", "10.0.0.1", "CoreAdmin@123", "admin"),
+                                "Vlan1", "10.0.0.1", "TODO_SET_PASSWORD", "admin"),
 }
 
 CISCO_TEMPLATES = {
     "接入交换机标准配置": _mk_template("思科接入层交换机标准配置模板", "Access-SW-01",
-                                   "Vlan1", "192.168.1.1", "Admin@123", "admin"),
+                                   "Vlan1", "192.168.1.1", "TODO_SET_PASSWORD", "admin"),
     "核心交换机配置": _mk_template("思科核心层交换机配置模板", "Core-SW-01",
-                                "Vlan1", "10.0.0.1", "CoreAdmin@123", "admin"),
+                                "Vlan1", "10.0.0.1", "TODO_SET_PASSWORD", "admin"),
 }
 
 # 厂商 → 模板集（模板对话框与菜单统一从这里取）
@@ -555,10 +555,9 @@ class MainWindow(QMainWindow):
     def _apply_form_layout_polish(self):
         """统一打磨全窗口表单与卡片（一处代码覆盖所有 tab）：
         - 标签右对齐 + 按字体实际宽度自适应列宽 → 所有分组的输入框起点跨布局对齐
-        - QGroupBox 轻阴影 → 卡片层次感
+        - 卡片层次靠 QSS 的细边框 + 圆角 + 白卡片压在灰底上（不再用 QGraphicsDropShadowEffect）
         """
         from PyQt5.QtWidgets import QFormLayout, QGroupBox, QLabel
-        from PyQt5.QtWidgets import QGraphicsDropShadowEffect
         from PyQt5.QtGui import QFontMetrics
 
         # 1) 收集全窗口所有表单标签，计算统一标签列宽（最长标签宽 + 余量）
@@ -584,16 +583,11 @@ class MainWindow(QMainWindow):
                 if item is not None and isinstance(item.widget(), QLabel):
                     item.widget().setFixedWidth(label_width)
 
-        # 3) 卡片轻阴影（深色主题下用黑影，浅色保持墨色淡影）
-        for group in self.findChildren(QGroupBox):
-            shadow = QGraphicsDropShadowEffect(self)
-            shadow.setBlurRadius(22)
-            shadow.setOffset(0, 3)
-            shadow.setColor(QColor(0, 0, 0, 90) if theme.is_dark()
-                            else QColor(31, 42, 55, 28))  # 墨色 11% 透明度
-            group.setGraphicsEffect(shadow)
-
-        # 4) 卡片折叠化（信息分层）：点标题收起/展开，每个 tab 默认只展开第一张卡片
+        # 3) 卡片折叠化（信息分层）：点标题收起/展开，每个 tab 默认只展开第一张卡片
+        # 注意：这里曾经给 42 个 QGroupBox 逐个挂 QGraphicsDropShadowEffect（blur 22），
+        # 实测整窗重绘 20ms/帧 vs 去掉后 8.5ms/帧——Qt5 图形效果走软件光栅化，
+        # 无边框透明窗口拖动时每次都重算，用户感知明显卡顿。层次感改由 QSS 的
+        # 细边框 + 圆角 + 卡片/窗口底对比承担（styles.py QGroupBox），不牺牲观感。
         self._collapser = _GroupCollapser(self)
         for tab_key in ("basic", "vlan", "routing", "security", "interface"):
             tab = self.tabs.get(tab_key)

@@ -9,46 +9,52 @@ SSH 层复用 modules.device_connector（Netmiko），备份落盘复用 utils.b
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                              QGroupBox, QComboBox, QTextEdit, QLineEdit,
                              QPushButton, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QDialog, QDialogButtonBox,
-                              QSpinBox, QSplitter, QInputDialog, QLabel)
+                             QHeaderView, QSpinBox, QSplitter, QLabel)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QEvent
 
 from utils.device_store import DeviceStore
 from utils.credential_crypto import decrypt
-from gui.dialogs.base import info_box, question_box, warn_box
+from gui.dialogs.base import BaseDialog, info_box, question_box, warn_box
 from gui.widget_utils import page_header
 from modules import device_connector as dc
 from modules.device_connector import VENDOR_LABELS
 
 
 # ---------------------------------------------------------------- 设备编辑对话框
-class DeviceDialog(QDialog):
-    """新增/编辑设备表单"""
+class DeviceDialog(BaseDialog):
+    """新增/编辑设备表单（统一 BaseDialog 皮肤：圆点标题栏 + 语义按钮 + 双主题）
+
+    原来直接继承 QDialog：系统标题栏 + QDialogButtonBox 的 OK/Cancel
+    在深色主题下还是白底方角，与全应用圆角语言完全脱节（弹窗巡检实锤）。
+    """
 
     VENDORS = [("huawei", "华为"), ("h3c", "H3C"), ("ruijie", "锐捷"), ("maipu", "迈普"), ("cisco", "思科")]
     ROLES = [("access", "接入"), ("core", "核心"), ("exit", "出口"), ("dc", "数据中心")]
 
     def __init__(self, device=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("编辑设备" if device else "新增设备")
-        self.setMinimumWidth(380)
+        editing = bool(device)
+        super().__init__("编辑设备" if editing else "新增设备",
+                         "填写设备信息；SSH 密码在本地加密存储，不会明文落盘。",
+                         parent, min_width=520,
+                         window_title="编辑设备" if editing else "新增设备")
         self._device = device or {}
 
-        layout = QFormLayout(self)
-        layout.setSpacing(10)
+        form = QFormLayout()
+        form.setSpacing(11)
+        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self.name_input = QLineEdit(self._device.get("name", ""))
         self.name_input.setPlaceholderText("如：核心-S9306")
-        layout.addRow("设备名称:", self.name_input)
+        form.addRow("设备名称:", self.name_input)
 
         self.ip_input = QLineEdit(self._device.get("ip", ""))
         self.ip_input.setPlaceholderText("192.168.1.1")
-        layout.addRow("管理 IP:", self.ip_input)
+        form.addRow("管理 IP:", self.ip_input)
 
         self.port_input = QSpinBox()
         self.port_input.setRange(1, 65535)
         self.port_input.setValue(int(self._device.get("ssh_port", 22)))
-        layout.addRow("SSH 端口:", self.port_input)
+        form.addRow("SSH 端口:", self.port_input)
 
         self.vendor_input = QComboBox()
         for value, label in self.VENDORS:
@@ -56,11 +62,11 @@ class DeviceDialog(QDialog):
         if device:
             idx = self.vendor_input.findData(device.get("vendor", "huawei"))
             self.vendor_input.setCurrentIndex(max(idx, 0))
-        layout.addRow("厂商:", self.vendor_input)
+        form.addRow("厂商:", self.vendor_input)
 
         self.model_input = QLineEdit(self._device.get("model", ""))
         self.model_input.setPlaceholderText("S5735 / S6520（可选）")
-        layout.addRow("型号:", self.model_input)
+        form.addRow("型号:", self.model_input)
 
         self.role_input = QComboBox()
         for value, label in self.ROLES:
@@ -68,23 +74,33 @@ class DeviceDialog(QDialog):
         if device:
             idx = self.role_input.findData(device.get("role", "access"))
             self.role_input.setCurrentIndex(max(idx, 0))
-        layout.addRow("角色:", self.role_input)
+        form.addRow("角色:", self.role_input)
 
         self.user_input = QLineEdit(self._device.get("username", ""))
-        layout.addRow("用户名:", self.user_input)
+        form.addRow("用户名:", self.user_input)
 
         self.pwd_input = QLineEdit()
         self.pwd_input.setEchoMode(QLineEdit.Password)
         self.pwd_input.setPlaceholderText("编辑时留空=不修改")
-        layout.addRow("密码:", self.pwd_input)
+        form.addRow("密码:", self.pwd_input)
 
         self.notes_input = QLineEdit(self._device.get("notes", ""))
-        layout.addRow("备注:", self.notes_input)
+        form.addRow("备注:", self.notes_input)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
+        self.content_layout().addLayout(form)
+        cancel = self.add_close_button("取消", "ghost")
+        save = self.add_button("保存" if editing else "添加", "primary")
+        # 关键：QPushButton.autoDefault 默认 True，首个按钮（取消）会被 Qt
+        # 自动设为对话框 default；在任一输入框按回车 → 误触取消 → reject()
+        # → 已填设备信息被静默丢弃。显式关掉取消的 autoDefault，并把保存
+        # 设为默认按钮，回车提交表单。
+        cancel.setAutoDefault(False)
+        save.setAutoDefault(False)
+        save.setDefault(True)
+        for line_edit in (self.name_input, self.ip_input, self.model_input,
+                          self.user_input, self.pwd_input, self.notes_input):
+            line_edit.returnPressed.connect(save.click)
+        self.name_input.setFocus()
 
     def data(self):
         return {

@@ -105,8 +105,18 @@ case("B6 命令卡片入队", cards_n >= 3, f"{cards_n} 张卡片")
 if cards_n:
     risks = [c["risk"] for c in ai._cards]
     case("B7 风险分级已标注", set(risks) <= {"readonly", "write", "dangerous"}, str(set(risks)))
-queue_label = ai._queue_group.title()
-case("B8 队列标题统计联动", f"{cards_n} 条" in queue_label, queue_label)
+    # v4.2 队列标题精简（2026-11-17 用户改动）：GroupBox 标题只留「待确认命令队列 ⚠N」，
+    # 总条数/只读数统计挪到筛选行 shown_label（「显示 x/y」）
+    queue_label = ai._queue_group.title()
+    n_danger = sum(1 for c in ai._cards if c["risk"] == "dangerous")
+    if n_danger:
+        title_ok = f"⚠{n_danger}" in queue_label
+    else:
+        title_ok = f"（{cards_n}）" in queue_label
+    shown_text = ai.shown_label.text()
+    shown_ok = f"共 {cards_n} 条" in shown_text
+    case("B8 队列标题统计联动", title_ok and shown_ok,
+         f"标题「{queue_label}」（n_danger={n_danger}）· 计数行「{shown_text}」")
 
 print("\n[Stage C] 卡片审阅操作")
 if cards_n:

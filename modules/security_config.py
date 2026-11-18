@@ -340,7 +340,7 @@ class SecurityConfigGenerator:
         if unicast:
             config_lines.append(f" storm-control unicast min-rate {unicast}\n")
         
-        config_lines.append(" storm-control action {action}\n")
+        config_lines.append(f" storm-control action {action}\n")
         config_lines.append("#\n")
         return "".join(config_lines)
     

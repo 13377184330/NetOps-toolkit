@@ -46,6 +46,10 @@ class MACLookupWorker(QThread):
             clean_mac = self.clean_mac(self.mac)
             oui = clean_mac[:6].upper()
             
+            # 内置常见 OUI 速查表（仅覆盖常见前缀，未命中再走在线查询）。
+            # 注意：每个 OUI 只应定义一次——重复 key 会被后者静默覆盖，导致
+            # 查询到的厂商与表内分类不符。曾存在 001E10/0011FB/001E58 三组
+            # 重复，已去重；厂商归属建议以 IEEE 官方 OUI 库为准定期核对。
             local_oui_db = {
                 "001A2C": {"vendor": "Huawei", "country": "China"},
                 "001A2D": {"vendor": "Huawei", "country": "China"},
@@ -126,8 +130,6 @@ class MACLookupWorker(QThread):
                 "001B11": {"vendor": "D-Link", "country": "Taiwan"},
                 "001CF6": {"vendor": "D-Link", "country": "Taiwan"},
                 "001E58": {"vendor": "D-Link", "country": "Taiwan"},
-                "0011FB": {"vendor": "TP-Link", "country": "China"},
-                "001E58": {"vendor": "TP-Link", "country": "China"},
                 "002275": {"vendor": "TP-Link", "country": "China"},
                 "0023CD": {"vendor": "TP-Link", "country": "China"},
                 "002522": {"vendor": "TP-Link", "country": "China"},
@@ -156,7 +158,6 @@ class MACLookupWorker(QThread):
                 "00268C": {"vendor": "ZTE", "country": "China"},
                 "002719": {"vendor": "ZTE", "country": "China"},
                 "002902": {"vendor": "ZTE", "country": "China"},
-                "001E10": {"vendor": "ZTE", "country": "China"},
                 "0023EB": {"vendor": "ZTE", "country": "China"},
                 "001C44": {"vendor": "ZTE", "country": "China"},
                 "000DE9": {"vendor": "Samsung", "country": "Korea"},
@@ -356,12 +357,15 @@ class MACToolWidget(QWidget):
         else:
             formatted = clean
         
+        separator_label = {':': '冒号', '-': '短横', '.': '点', '': '无分隔符'}.get(separator, '冒号')
         result_text = f"""
 {'─' * 50}
-📝 MAC地址格式转换
+📝 MAC地址格式转换（当前选择：{separator_label}格式）
 {'─' * 50}
 原始输入: {mac}
 
+▶ {separator_label}格式: {formatted}
+  ─────────────────────────
 冒号格式: {':'.join(clean[i:i+2] for i in range(0, 12, 2))}
 短横格式: {'-'.join(clean[i:i+2] for i in range(0, 12, 2))}
 点格式:   {'.'.join(clean[i:i+4] for i in range(0, 12, 4))}

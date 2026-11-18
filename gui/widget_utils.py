@@ -2,10 +2,79 @@
 # -*- coding: utf-8 -*-
 """通用 UI 小工具（二开）"""
 
-from PyQt5.QtWidgets import QTableWidgetItem
-from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QTableWidgetItem, QLayout
+from PyQt5.QtCore import Qt, QRect, QPoint, QSize
 
 _SORT_ROLE = Qt.UserRole + 1
+
+
+class FlowLayout(QLayout):
+    """自动折行布局：一行放不下就把后续控件挪到下一行。
+
+    用于"工具行"这类控件多、宽度不定的横排：窗口窄时自动折行，
+    而不是把整页撑宽、让右栏和底部按钮被窗口边缘切掉。
+    每个 item 保持自己的 sizeHint，不参与 stretch 瓜分。
+    """
+
+    def __init__(self, parent=None, spacing=8, margin=0):
+        super().__init__(parent)
+        self._items = []
+        self._spacing = spacing
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item):
+        self._items.append(item)
+
+    def count(self):
+        return len(self._items)
+
+    def itemAt(self, index):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self):
+        return Qt.Orientations(Qt.Vertical)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self._do_layout(QRect(0, 0, width, 0), test=True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, test=False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        # 最窄 = 最宽单个控件的宽度；高度交给 heightForWidth
+        m = self.contentsMargins()
+        w = max((it.minimumSize().width() for it in self._items), default=0)
+        return QSize(w + m.left() + m.right(),
+                     self.heightForWidth(w) + m.top() + m.bottom())
+
+    def _do_layout(self, rect, test):
+        m = self.contentsMargins()
+        x = rect.x() + m.left()
+        y = rect.y() + m.top()
+        line_h = 0
+        right = rect.right() - m.right()
+        for item in self._items:
+            w = item.sizeHint().width()
+            h = item.sizeHint().height()
+            if x + w > right and x > rect.x() + m.left():
+                x = rect.x() + m.left()
+                y += line_h + self._spacing
+                line_h = 0
+            if not test:
+                item.setGeometry(QRect(QPoint(x, y), QSize(w, h)))
+            x += w + self._spacing
+            line_h = max(line_h, h)
+        return y + line_h - rect.y() + m.bottom()
 
 
 def page_header(title, subtitle=""):

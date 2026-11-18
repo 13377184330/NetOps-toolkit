@@ -18,9 +18,9 @@ import html as _html
 
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QTextCursor
-from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGroupBox, QHBoxLayout,
-                              QLabel, QPushButton, QScrollArea, QSplitter,
-                              QTextBrowser, QTextEdit, QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGroupBox, QGridLayout,
+                              QHBoxLayout, QLabel, QPushButton, QScrollArea,
+                              QSplitter, QTextBrowser, QTextEdit, QVBoxLayout, QWidget)
 
 import os
 import sys
@@ -290,8 +290,12 @@ class AIOpsTab(QWidget):
         lay.addWidget(page_header("AI 运维", "自然语言描述 → AI 生成命令 → 人工审阅确认 → 受控下发"))
 
         # ---- 工具行 ----
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        # 用可折行布局：窄窗口（1024 最小宽）下这些控件单行排不开，
+        # 原来用 QHBoxLayout 会把整页 sizeHint 撑到 1045px（窗口只有 904px），
+        # 右栏"确认执行"和底部"发送"被切到窗口外（截图实锤）。自动折行后
+        # 页宽不再超窗口，窄了就分两行，用户不用拖宽窗口。
+        from gui.widget_utils import FlowLayout
+        bar = FlowLayout(spacing=8)
 
         self.mode_combo = QComboBox()
         for key, name in _MODES:
@@ -311,7 +315,7 @@ class AIOpsTab(QWidget):
         self.device_combo.setMinimumWidth(180)
         self._reload_devices()
         bar.addWidget(QLabel("目标设备:"))
-        bar.addWidget(self.device_combo, 1)
+        bar.addWidget(self.device_combo)
 
         self.refresh_btn = QPushButton("↻")
         self.refresh_btn.setFixedSize(34, 34)
@@ -379,34 +383,39 @@ class AIOpsTab(QWidget):
         q_bar = QHBoxLayout()
         q_bar.setSpacing(6)
         _compact = "QPushButton { padding: 7px 11px; font-size: 12px; }"   # 右栏窄，覆盖全局大 padding
+        # 原 4 个按钮单行并排：自然宽合计 ~216px + 2 个主按钮 ~234px 共需 ~468px，
+        # 而右栏在 1024px 最小窗口下只有 360px → 按钮被挤出边界、"确认执行"只露半截
+        # 还带出横向滚动条。改 2×2 网格，窄栏下稳稳放得下。
+        q_grid = QGridLayout()
+        q_grid.setSpacing(6)
         self.select_all_btn = QPushButton("全选")
         self.select_all_btn.setObjectName("ghostButton")
         self.select_all_btn.setStyleSheet(_compact)
         self.select_all_btn.setToolTip("勾选全部「写配置」命令（只读命令不参与下发）")
         self.select_all_btn.clicked.connect(lambda: self._toggle_all(True))
-        q_bar.addWidget(self.select_all_btn)
+        q_grid.addWidget(self.select_all_btn, 0, 0)
 
         self.none_btn = QPushButton("取消")
         self.none_btn.setObjectName("ghostButton")
         self.none_btn.setStyleSheet(_compact)
         self.none_btn.setToolTip("取消全部勾选")
         self.none_btn.clicked.connect(lambda: self._toggle_all(False))
-        q_bar.addWidget(self.none_btn)
+        q_grid.addWidget(self.none_btn, 0, 1)
 
         clear_btn = QPushButton("清空")
         clear_btn.setObjectName("ghostButton")
         clear_btn.setStyleSheet(_compact)
         clear_btn.setToolTip("清空命令队列")
         clear_btn.clicked.connect(self._clear_queue)
-        q_bar.addWidget(clear_btn)
+        q_grid.addWidget(clear_btn, 1, 0)
 
         to_gen_btn = QPushButton("转配置页")
         to_gen_btn.setObjectName("ghostButton")
         to_gen_btn.setStyleSheet(_compact)
         to_gen_btn.setToolTip("把勾选的命令转入「配置生成」页预览，继续用导出/保存模板/下发等完整功能")
         to_gen_btn.clicked.connect(self._send_to_config_gen)
-        q_bar.addWidget(to_gen_btn)
-        q_lay.addLayout(q_bar)
+        q_grid.addWidget(to_gen_btn, 1, 1)
+        q_lay.addLayout(q_grid)
 
         # 风险筛选（真实用户实测：78 卡时找高危/特定命令只能拖滚动条——必须给筛选通道）
         filter_bar = QHBoxLayout()
@@ -911,19 +920,20 @@ class AIOpsTab(QWidget):
                 w.deleteLater()
         n_danger = sum(1 for c in self._cards if c["risk"] == "dangerous")
         n_readonly = sum(1 for c in self._cards if c["risk"] == "readonly")
-        # 高危警示：标题红色 + 计数高亮（用户实测反馈“高危很难被发现”）
+        # 标题保持短：原来把「条数·高危·只读」全塞进 GroupBox 标题，
+        # 在 360px 右栏里超过可用宽被裁成"…只读"（截图实锤）。
+        # 统计信息放到筛选行的 shown_label，那里有整行宽度。
         if n_danger:
-            self._queue_group.setTitle(
-                f"待确认命令队列（{len(self._cards)} 条 · ⚠ 高危 {n_danger} · 只读 {n_readonly}）")
+            self._queue_group.setTitle(f"待确认命令队列 ⚠{n_danger}")
             self._queue_group.setStyleSheet(self._queue_group.styleSheet().replace(
                 f"color: {TEXT}; font-size: 14px;", f"color: {DANGER}; font-size: 14px;"))
         else:
-            self._queue_group.setTitle(
-                f"待确认命令队列（{len(self._cards)} 条 · 高危 0 · 只读 {n_readonly}）")
+            self._queue_group.setTitle(f"待确认命令队列（{len(self._cards)}）")
             self._queue_group.setStyleSheet(self._queue_group.styleSheet().replace(
                 f"color: {DANGER}; font-size: 14px;", f"color: {TEXT}; font-size: 14px;"))
         if not self._cards:
             empty = QLabel("队列空：AI 生成的命令会出现在这里，逐条核验勾选后才可下发")
+            empty.setWordWrap(True)   # 窄右栏下允许换行（全局换行守卫会给够高度）
             empty.setStyleSheet(f"color: {TEXT_SUB}; font-size: 12px;")
             empty.setAlignment(Qt.AlignCenter)
             self.queue_lay.addWidget(empty)
@@ -931,7 +941,7 @@ class AIOpsTab(QWidget):
         order = {"dangerous": 0, "write": 1, "readonly": 2}
         self._cards.sort(key=lambda c: order.get(c.get("risk"), 1))
         visible = self._visible_cards()
-        self.shown_label.setText(f"显示 {len(visible)}/{len(self._cards)}")
+        self.shown_label.setText(f"共 {len(self._cards)} 条 · 只读 {n_readonly} · 显示 {len(visible)}")
         for idx, c in visible:
             self.queue_lay.addWidget(self._make_card_row(c, idx))
         self.queue_lay.addStretch()
@@ -1328,7 +1338,10 @@ class AIOpsTab(QWidget):
         lay.addWidget(lst)
         confirm = dlg.add_button("确定", "primary", lambda: dlg.accept(), close_on_click=False)
         dlg.add_close_button("取消", "ghost")
-        dlg.exec_()
+        if not dlg.exec_():
+            # 点取消/关窗 → reject()，必须返回空列表；原实现忽略返回值，
+            # 用户取消后仍带着选中项继续走下发确认甚至真正下发（危险）。
+            return []
         return [lst.item(i).data(Qt.UserRole) for i in range(lst.count())
                 if lst.item(i).isSelected()]
 

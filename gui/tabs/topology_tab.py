@@ -1497,15 +1497,15 @@ class NetworkTopologyPage(QWidget):
                          "请先点「🔌 一键采集」完成一次采集，再开启实时刷新。")
                 return
             from PyQt5.QtCore import QTimer
-            self.live_timer = QTimer(self)
-            self.live_timer.timeout.connect(self._live_tick)
-            self.live_timer.start(2000)   # 开启后 2s 先来一轮（快速反馈）
+            self._live_timer = QTimer(self)
+            self._live_timer.timeout.connect(self._live_tick)
+            self._live_timer.start(2000)   # 开启后 2s 先来一轮（快速反馈）
             self.live_btn.setText("实时: 开")
             self._sys_live_note("实时刷新已开启（30s 一轮，只读；采集/下发期间自动让路）")
         else:
-            if self.live_timer is not None:
-                self.live_timer.stop()
-                self.live_timer = None
+            if self._live_timer is not None:
+                self._live_timer.stop()
+                self._live_timer = None
             self.live_btn.setText("实时: 关")
             self._sys_live_note("实时刷新已关闭")
 

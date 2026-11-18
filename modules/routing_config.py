@@ -3,6 +3,7 @@
 """
 NetOps Toolkit - 路由配置模块
 """
+from utils.net_addr import bgp_network_line
 
 
 class RoutingConfigGenerator:
@@ -110,7 +111,7 @@ class RoutingConfigGenerator:
         
         if networks:
             for network in networks:
-                config_lines.append(f"  network {network}\n")
+                config_lines.append(f"  {bgp_network_line(network, style='vrp')}\n")
         
         if import_routes:
             for route in import_routes:

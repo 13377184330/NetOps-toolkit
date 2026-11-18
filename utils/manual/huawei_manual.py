@@ -55,9 +55,9 @@ HUAWEI_COMMANDS = {
             "Console波特率": {"command": "speed <baud-rate>", "description": "设置Console波特率", "example": "[Huawei-ui-console0] speed 115200"}
         },
         "域名解析": {
-            "配置DNS服务器": {"command": "ip dns server <ip> [priority]", "description": "配置DNS服务器地址", "example": "[Huawei] ip dns server 8.8.8.8\n[Huawei] ip dns server 114.114.114.114 priority 2"},
-            "配置域名后缀": {"command": "ip domain <domain-name>", "description": "配置默认域名后缀", "example": "[Huawei] ip domain example.com"},
-            "启用DNS解析": {"command": "ip dns resolve", "description": "启用DNS域名解析功能", "example": "[Huawei] ip dns resolve"},
+            "配置DNS服务器": {"command": "dns server <ip>", "description": "配置DNS服务器地址（VRP 无 ip dns server 命令）", "example": "[Huawei] dns server 8.8.8.8\n[Huawei] dns server 114.114.114.114"},
+            "配置域名后缀": {"command": "dns domain <domain-name>", "description": "配置默认域名后缀（VRP 命令为 dns domain）", "example": "[Huawei] dns domain example.com"},
+            "启用DNS解析": {"command": "dns resolve", "description": "启用DNS域名解析功能（VRP 命令为 dns resolve）", "example": "[Huawei] dns resolve"},
             "静态DNS映射": {"command": "ip host <hostname> <ip>", "description": "配置静态主机名解析", "example": "[Huawei] ip host server1 192.168.1.100"},
             "测试DNS解析": {"command": "ping <hostname>", "description": "测试域名解析", "example": "<Huawei> ping www.google.com"}
         }

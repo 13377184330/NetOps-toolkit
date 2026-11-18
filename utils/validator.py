@@ -191,11 +191,14 @@ class ConfigValidator:
         if not is_valid:
             return False, "反掩码格式不正确"
         
-        parts = [int(x) for x in wildcard.split('.')]
-        for i in range(3):
-            if parts[i] < parts[i+1]:
-                return False, "反掩码格式不正确（必须为连续的0和1）"
-        
+        # 反掩码合法性 = 32 位里 0/1 各自连续，即相邻位翻转次数 ≤ 1。
+        # 原实现 `parts[i] < parts[i+1]` 按字节递增判断方向写反：会拒绝
+        # 合法的 0.0.0.255 / 255.255.255.0，却放行非连续的 0.255.0.255。
+        parts = [int(x) for x in wildcard.strip().split('.')]
+        bits = "".join(f"{p:08b}" for p in parts)
+        flips = sum(1 for i in range(len(bits) - 1) if bits[i] != bits[i + 1])
+        if flips > 1:
+            return False, "反掩码格式不正确（必须为连续的0和1）"
         return True, "反掩码格式正确"
 
 

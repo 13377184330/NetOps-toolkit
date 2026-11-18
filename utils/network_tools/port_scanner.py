@@ -65,6 +65,12 @@ class PortScanner:
             "banner": "",
             "error": ""
         }
+        # 端口合法范围 1-65535；越界直接返回 error，避免 connect_ex 抛
+        # OSError 或上层 range 生成非法端口。
+        if not isinstance(port, int) or not (1 <= port <= 65535):
+            result["status"] = "error"
+            result["error"] = f"端口 {port} 超出有效范围 1-65535"
+            return result
         
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -230,6 +236,12 @@ class PortScanner:
         """
         扫描端口范围
         """
+        # 校验范围，避免 range(70000, ...) 生成无效端口并放行到扫描层
+        if not (1 <= start_port <= 65535 and 1 <= end_port <= 65535
+                and start_port <= end_port):
+            return {"success": False,
+                    "error": f"端口范围 {start_port}-{end_port} 无效（须 1-65535 且start<=end）",
+                    "total_ports": 0, "ports": []}
         ports = list(range(start_port, end_port + 1))
         return PortScanner.scan_ports(host, ports, timeout, max_workers, progress_callback)
     

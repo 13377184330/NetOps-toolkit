@@ -3,6 +3,20 @@
 """
 NetOps Toolkit - 基础配置模块（增强版）
 """
+import re
+
+
+def _vrp_timezone(timezone):
+    """`UTC+8`/`UTC-5` → VRP `clock timezone NAME {add|subtract} HH:MM:00`。
+
+    原实现偏移硬编码 `add 08:00:00`，GUI 选 UTC-5/UTC+0 时偏移全错。
+    """
+    s = str(timezone).strip()
+    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
+    if m:
+        name, sign, h = m.group(1), m.group(2), int(m.group(3))
+        return name, ("subtract" if sign == "-" else "add"), f"{h:02d}:00:00"
+    return (s.replace(" ", "_") or "UTC"), "add", "00:00:00"
 
 
 class BasicConfigGenerator:
@@ -83,7 +97,7 @@ class BasicConfigGenerator:
     
     @staticmethod
     def generate_aaa_user(username: str = "admin",
-                         password: str = "admin@123",
+                         password: str = "TODO_SET_PASSWORD",
                          level: int = 15,
                          encrypted: bool = False,
                          service_types: list = None) -> str:
@@ -104,7 +118,8 @@ class BasicConfigGenerator:
                            broadcast_enable: bool = False) -> str:
         """生成NTP配置"""
         config_lines = []
-        config_lines.append(f"clock timezone {timezone} add 08:00:00\n")
+        name, direction, offset = _vrp_timezone(timezone)
+        config_lines.append(f"clock timezone {name} {direction} {offset}\n")
         
         if servers:
             for idx, server in enumerate(servers, 1):
@@ -135,7 +150,7 @@ class BasicConfigGenerator:
         config_lines.append(f"snmp-agent sys-info version {version}\n")
         
         if sys_name:
-            config_lines.append(f"snmp-agent sys-info contact {sys_contact}\n")
+            config_lines.append(f"snmp-agent sys-info name {sys_name}\n")
         if sys_location:
             config_lines.append(f"snmp-agent sys-info location {sys_location}\n")
         if sys_contact:
@@ -149,7 +164,10 @@ class BasicConfigGenerator:
         
         if trap_enable and trap_host:
             config_lines.append("snmp-agent trap enable\n")
-            config_lines.append(f"snmp-agent target-host trap address udp-domain {trap_host} params securityname public\n")
+            # trap securityname 复用 community_read，绝不硬编码公开团体字；
+            # 无配置时用占位符，下发前须人工替换。
+            sec = community_read or "TODO_SET_COMMUNITY"
+            config_lines.append(f"snmp-agent target-host trap address udp-domain {trap_host} params securityname {sec}\n")
         
         config_lines.append("#\n")
         return "".join(config_lines)
@@ -293,7 +311,7 @@ class BasicConfigGenerator:
             config_lines.append("\n#\n# 用户配置\n#\n")
             config_lines.append(BasicConfigGenerator.generate_aaa_user(
                 config["user"].get("username", "admin"),
-                config["user"].get("password", "admin@123"),
+                config["user"].get("password", "TODO_SET_PASSWORD"),
                 config["user"].get("level", 15),
                 config["user"].get("encrypted", False),
                 config["user"].get("service_types")

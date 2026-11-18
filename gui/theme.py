@@ -268,6 +268,7 @@ _TEXT_MAP = {
 
 # 线（边框 / 下划线）
 _LINE_MAP = {
+    # 中性边框
     "#DFE6F0": DARK["border"],
     "#E5EAF2": DARK["border"],
     "#C9D4E3": DARK["border_strong"],
@@ -278,6 +279,14 @@ _LINE_MAP = {
     "#D0D0D0": DARK["border"],
     "#E0E0E0": DARK["border"],
     "#E8E8E8": DARK["border"],
+    # 用「背景色」当分隔线的写法（QSS 里 border-bottom/right: 1px solid {BG}，
+    # 模板管理器列表项、表格表头竖线都这么写）：只登记在 SURFACE_MAP 里会让
+    # border 属性漏翻，深色主题下留出一条条亮白线（截图实锤）。这里补一份。
+    "#ECF0F6": DARK["gridline"],
+    "#F7F9FC": DARK["card_alt"],
+    "#FAFBFD": DARK["zebra"],
+    "#F5F7FA": DARK["disabled_bg"],
+    # 品牌/状态色
     "#0089FF": DARK["accent"],
     "#0077E6": DARK["accent_hover"],
     "#E64646": DARK["danger_hover"],
@@ -371,11 +380,30 @@ def install():
     from PyQt5.QtCore import Qt as _Qt, QEvent as _QEvent, QObject as _QObject
     from PyQt5.QtGui import QPainterPath as _QPainterPath, QRegion as _QRegion
     from PyQt5.QtCore import QRectF as _QRectF
-    from PyQt5.QtWidgets import QMenu as _QMenu, QApplication as _QApplication
+    from PyQt5.QtWidgets import (QMenu as _QMenu, QApplication as _QApplication,
+                                 QLabel as _QLabel)
     global _orig_menu_init, _orig_qapp_init, _menu_radius, _menu_mask_filter
     if _orig_menu_init is None:
         _orig_menu_init = _QMenu.__init__
         _orig_qapp_init = _QApplication.__init__
+
+        # 换行说明标签的"最小高度"守卫：
+        # QLabel.setWordWrap(True) + 布局里有 stretch 兄弟（QTextEdit/表格）时，
+        # 布局按 minimumSizeHint 分配——wordWrap 标签的 minimumSizeHint 只有一行高，
+        # 于是多行说明被压成一行，第二三行掉到控件边框外看不见（用户原话：
+        # "字都上下折叠起来，要上下边框拉开才能看到"）。这里在 Resize 时按当前
+        # 实际宽度用 heightForWidth 算出所需高度，设成 minimumHeight 下限，
+        # 布局便无法再压扁它；宽度变窄换行增多时会自动跟着长高。
+        class _WrapLabelGuard(_QObject):
+            def eventFilter(self, obj, ev):
+                if ev.type() == _QEvent.Resize and isinstance(obj, _QLabel) and obj.wordWrap():
+                    try:
+                        need = obj.heightForWidth(obj.width())
+                        if need > 0 and obj.minimumHeight() < need:
+                            obj.setMinimumHeight(need)
+                    except Exception:
+                        pass
+                return False
 
         def _menu_init(self, *args, **kwargs):
             _orig_menu_init(self, *args, **kwargs)
@@ -436,6 +464,11 @@ def install():
                 g = _ComboPopupPaletteFilter(self)
                 self.installEventFilter(g)
                 self._netops_combo_palette_filter = g
+            h = getattr(self, "_netops_wrap_label_guard", None)
+            if h is None:
+                h = _WrapLabelGuard(self)
+                self.installEventFilter(h)
+                self._netops_wrap_label_guard = h
         _QMenu.__init__ = _menu_init
         _QApplication.__init__ = _qapp_init
 

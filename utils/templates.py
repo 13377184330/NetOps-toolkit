@@ -195,7 +195,7 @@ TEMPLATES = {
                 "vlanifs": [
                     {"vlan_id": 100, "ip_address": "10.100.0.1", "mask": "255.255.255.0"},
                     {"vlan_id": 200, "ip_address": "10.200.0.1", "mask": "255.255.255.0"},
-                    {"vlan_id": 300, "ip_address": "10.300.0.1", "mask": "255.255.255.0"}
+                    {"vlan_id": 300, "ip_address": "10.30.0.1", "mask": "255.255.255.0"}
                 ]
             },
             "routing": {
@@ -206,7 +206,7 @@ TEMPLATES = {
                     "networks": [
                         {"address": "10.100.0.0", "mask": "0.0.0.255"},
                         {"address": "10.200.0.0", "mask": "0.0.0.255"},
-                        {"address": "10.300.0.0", "mask": "0.0.0.255"}
+                        {"address": "10.30.0.0", "mask": "0.0.0.255"}
                     ]
                 }
             },

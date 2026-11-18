@@ -5,7 +5,18 @@ H3C华三交换机配置生成器
 """
 
 import time
+import re
 from typing import Dict, List, Optional, Any
+
+
+def _comware_timezone(timezone):
+    """`UTC+8`/`UTC-5` → Comware `clock timezone NAME {add|subtract} HOURS`。"""
+    s = str(timezone).strip()
+    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
+    if m:
+        name, sign, h = m.group(1), m.group(2), int(m.group(3))
+        return name, ("subtract" if sign == "-" else "add"), h
+    return (s.replace(" ", "_") or "UTC"), "add", 0
 
 
 class H3CConfigGenerator:
@@ -504,7 +515,8 @@ class H3CConfigGenerator:
             
             lines.append("\n# NTP服务器配置")
             lines.append("ntp-service enable")
-            lines.append(f"clock timezone {timezone}")
+            tz_name, tz_dir, tz_hours = _comware_timezone(timezone)
+            lines.append(f"clock timezone {tz_name} {tz_dir} {tz_hours}")
             
             for server in servers:
                 ip = server.get("ip", "")
@@ -521,18 +533,22 @@ class H3CConfigGenerator:
             lines.append("snmp-agent")
             lines.append(f" snmp-agent sys-info version {version.replace('v', 'v').lower()}")
             
-            if version == "v2c":
-                community_read = snmp.get("community_read", "public")
+            community_read = ""  # 供 trap 分支复用，避免 v3/all 下未定义
+            if version in ("v2c", "all"):
+                community_read = snmp.get("community_read", "")
                 community_write = snmp.get("community_write", "")
                 
-                lines.append(f" snmp-agent community read {community_read}")
+                if community_read:
+                    lines.append(f" snmp-agent community read {community_read}")
                 if community_write:
                     lines.append(f" snmp-agent community write {community_write}")
             
             if snmp.get("trap_enable"):
                 trap_host = snmp.get("trap_host", "")
                 if trap_host:
-                    lines.append(f" snmp-agent target-host trap address udp-domain {trap_host} params securityname {community_read} v2c")
+                    # 不硬编码公开团体字 public，复用已配置值或占位符
+                    sec = snmp.get("community_read", "") or "TODO_SET_COMMUNITY"
+                    lines.append(f" snmp-agent target-host trap address udp-domain {trap_host} params securityname {sec} v2c")
         
         if config.get("log"):
             log = config["log"]

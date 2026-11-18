@@ -3,6 +3,18 @@
 """
 迈普交换机配置生成器
 """
+import re
+from utils.net_addr import bgp_network_line
+
+
+def _tz_name_offset(timezone):
+    """`UTC+8`/`UTC-5` → (名称, 带符号小时)，供 IOS `clock timezone NAME HOURS`。"""
+    s = str(timezone).strip()
+    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
+    if m:
+        name, sign, h = m.group(1), m.group(2), int(m.group(3))
+        return name, -h if sign == "-" else h
+    return (s.replace(" ", "_") or "UTC"), 0
 
 
 class MaipuBasicGenerator:
@@ -70,18 +82,26 @@ class MaipuBasicGenerator:
         for server in servers:
             prefer = "prefer" if server.get("prefer") else ""
             lines.append(f"ntp server {server['ip']} {prefer}")
-        lines.append(f"clock timezone {timezone}")
+        # HiOS clock timezone 需「名称+偏移小时」，GUI 值是 UTC±N 字符串，
+        # 原实现直接拼 `clock timezone UTC-5`（缺偏移参数，设备拒绝）。
+        name, offset = _tz_name_offset(timezone)
+        lines.append(f"clock timezone {name} {offset}")
         return "\n".join(lines)
     
     @staticmethod
     def generate_snmp(version="2c", community_read=None, community_write=None,
                      location=None, contact=None, trap_enable=False, trap_host=None):
         lines = [f"snmp-server version {version}"]
-        
-        if community_read:
-            lines.append(f"snmp-server community {community_read} ro")
-        if community_write:
-            lines.append(f"snmp-server community {community_write} rw")
+        # community 属 v1/v2c，v3 用基于用户的安全模型，不应输出 community
+        # （华为/思科已按版本分流，此处同步）。
+        ver = str(version).lower()
+        if ver in ("v1", "v2", "v2c", "all", "2c"):
+            if community_read:
+                lines.append(f"snmp-server community {community_read} ro")
+            if community_write:
+                lines.append(f"snmp-server community {community_write} rw")
+        elif ver == "v3":
+            lines.append("! 注：SNMPv3 需配置 snmp-server user/group（GUI 暂不采集），请手工补充")
         if location:
             lines.append(f"snmp-server location {location}")
         if contact:
@@ -310,7 +330,7 @@ class MaipuRoutingGenerator:
         for peer in peers:
             lines.append(f" neighbor {peer['ip']} remote-as {peer['remote_as']}")
         for net in networks:
-            lines.append(f" network {net}")
+            lines.append(f" {bgp_network_line(net, style='ios')}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -327,14 +347,27 @@ class MaipuSecurityGenerator:
     """迈普安全配置生成器"""
     
     @staticmethod
-    def generate_acl(number, rules, description=None):
-        acl_type = "extended" if int(number) >= 100 else "standard"
+    def generate_acl(number, rules, description=None, acl_type=None):
+        # 迈普是 IOS 系编号规则：1-99 标准 / 100+ 扩展（与华为 2000/3000
+        # 分段不同）。此前误用华为规则导致未传 type 时 100-2999 的扩展 ACL
+        # 被降级成 standard，丢失协议/目的/端口。
+        if acl_type is None:
+            acl_type = "standard" if int(number) < 100 else "extended"
         lines = [f"ip access-list {acl_type} {number}"]
         if description:
             lines.append(f" remark {description}")
         
         for rule in rules:
             action = rule.get("action", "permit")
+            # IOS 标准 ACL 只能按源过滤，不允许协议/目的（否则整行被设备拒绝）
+            if str(acl_type).lower() in ("standard", "std"):
+                src = rule.get("source") or "any"
+                src_wc = rule.get("src_wildcard") or ""
+                line = f" {action} {src}"
+                if src != "any" and src_wc:
+                    line += f" {src_wc}"
+                lines.append(line)
+                continue
             proto = rule.get("protocol", "ip")
             src = rule.get("source", "any")
             src_wc = rule.get("src_wildcard", "")
@@ -510,11 +543,22 @@ class MaipuInterfaceGenerator:
     
     @staticmethod
     def generate_rate_limit(interface, rate_in=None, rate_out=None):
+        # GUI 入/出方向限速单位是 kbps，原实现错误地生成 storm-control pps
+        # （特性错+单位错）。迈普手册接口限速为 CAR `rate-limit {in|out}
+        # <bps> <burst-normal> <burst-max> conform-action ...`，kbps×1000 换算。
         lines = [f"interface {interface}"]
+        def _car(direction, kbps):
+            try:
+                bps = int(float(kbps)) * 1000
+            except (ValueError, TypeError):
+                return f" ! 注：限速值「{kbps}」无法解析，已跳过该方向"
+            burst = max(bps // 8, 1500)  # 约 1 秒突发量，下限一个以太网帧
+            return (f" rate-limit {direction} {bps} {burst} {burst*2} "
+                    "conform-action transmit exceed-action drop")
         if rate_in:
-            lines.append(f" storm-control broadcast pps {rate_in}")
+            lines.append(_car("input", rate_in))
         if rate_out:
-            lines.append(f" storm-control multicast pps {rate_out}")
+            lines.append(_car("output", rate_out))
         lines.append("!")
         return "\n".join(lines)
 
@@ -594,7 +638,8 @@ def generate_security_all(config: dict) -> str:
     parts = []
     for acl in config.get("acls", []):
         parts.append(MaipuSecurityGenerator.generate_acl(
-            acl["number"], _acl_rules(acl.get("rules", [])), acl.get("description")))
+            acl["number"], _acl_rules(acl.get("rules", [])), acl.get("description"),
+            acl_type=acl.get("type")))
     for ps in config.get("port_security", []):
         parts.append(MaipuSecurityGenerator.generate_port_security(
             ps["interface"], ps.get("max_mac", 1), ps.get("action", "shutdown"),

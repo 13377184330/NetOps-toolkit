@@ -7,29 +7,45 @@
 
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QLabel, QPushButton
 from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtGui import QCursor
+from PyQt5.QtGui import QCursor, QColor, QPainter
 
 from gui.styles import DANGER, WARNING, SUCCESS
 
 
 class DotButton(QPushButton):
-    """红/黄/绿圆点按钮"""
+    """红/黄/绿圆点按钮（自绘圆）
+
+    不靠 QSS 的 border-radius：Qt 5 样式引擎实测把带 background 的
+    QPushButton 画成方块（border: none 或直接给透明边都无效，填充率 100%
+    实锤，见真机截图）。paintEvent 直接画椭圆，跨 Qt 版本/主题稳定。
+    """
 
     def __init__(self, color, color_hover, tip, parent=None):
         super().__init__(parent)
         self.setFixedSize(13, 13)
         self.setCursor(QCursor(Qt.PointingHandCursor))
         self.setToolTip(tip)
-        self.setStyleSheet(f"""
-            QPushButton {{
-                border: none;
-                border-radius: 7px;
-                background: {color};
-            }}
-            QPushButton:hover {{
-                background: {color_hover};
-            }}
-        """)
+        self._color = QColor(color)
+        self._color_hover = QColor(color_hover)
+        self._hovered = False
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self._color_hover if self._hovered else self._color)
+        # 留 1px 给抗锯齿，避免圆被裁掉边缘
+        p.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
 
 
 class FramelessTitleBar(QWidget):

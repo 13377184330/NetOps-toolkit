@@ -488,7 +488,10 @@ class IPConverterWidget(QWidget):
         try:
             num = int(self.dec_input.text().strip())
             ip = IPAddressConverter.decimal_to_ip(num)
-            self.result_text.setPlainText(f"✅ 转换结果:\n   十进制: {num}\n   IP 地址: {ip}")
+            if not ip["success"]:
+                warn_box(self, "警告", "请输入 0-4294967295 之间的十进制数")
+                return
+            self.result_text.setPlainText(f"✅ 转换结果:\n   十进制: {num}\n   IP 地址: {ip['ip']}")
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         except Exception as e:
@@ -531,9 +534,12 @@ class IPConverterWidget(QWidget):
             warn_box(self, "警告", "请输入IP地址")
             return
         
-        result = IPAddressConverter.ip_to_hex(ip)
+        # IPAddressConverter 没有 ip_to_hex 方法（幻觉 API，点了必 AttributeError）。
+        # ip_to_decimal 的返回值里含 hex 字段，取用即可。
+        result = IPAddressConverter.ip_to_decimal(ip)
         if result["success"]:
-            self.result_text.setPlainText(f"✅ 转换结果:\n   IP 地址: {ip}\n   十六进制: {result['hex'].upper()}")
+            hex_val = result["hex"].replace("0x", "").upper().zfill(8)
+            self.result_text.setPlainText(f"✅ 转换结果:\n   IP 地址: {ip}\n   十六进制: {hex_val}")
             self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
             self.status_bar.setText("✅ 转换成功")
         else:

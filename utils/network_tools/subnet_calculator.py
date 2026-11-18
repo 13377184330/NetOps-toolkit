@@ -117,11 +117,26 @@ class SubnetCalculator:
         result["wildcard_mask"] = SubnetCalculator.int_to_ip(wildcard_int)
         
         result["total_hosts"] = broadcast_int - network_int + 1
-        result["usable_hosts"] = max(0, result["total_hosts"] - 2)
-        
+        total = result["total_hosts"]
+        # 与 get_all_masks 的口径统一（RFC 3021）：/32 单机 1 个可用地址，
+        # /31 点对点链路 2 个可用地址，其余扣网络号+广播号。
+        if total <= 2:
+            result["usable_hosts"] = total
+        else:
+            result["usable_hosts"] = total - 2
+
         if result["usable_hosts"] > 0:
-            result["first_usable"] = SubnetCalculator.int_to_ip(network_int + 1)
-            result["last_usable"] = SubnetCalculator.int_to_ip(broadcast_int - 1)
+            # /32：唯一地址即网络地址本身；/31：两个端点地址都可用；
+            # 普通网段：去掉网络号与广播号。
+            if total == 1:
+                result["first_usable"] = SubnetCalculator.int_to_ip(network_int)
+                result["last_usable"] = SubnetCalculator.int_to_ip(network_int)
+            elif total == 2:
+                result["first_usable"] = SubnetCalculator.int_to_ip(network_int)
+                result["last_usable"] = SubnetCalculator.int_to_ip(broadcast_int)
+            else:
+                result["first_usable"] = SubnetCalculator.int_to_ip(network_int + 1)
+                result["last_usable"] = SubnetCalculator.int_to_ip(broadcast_int - 1)
         
         first_octet = int(ip.split('.')[0])
         if first_octet < 128:
@@ -192,7 +207,11 @@ class SubnetCalculator:
         subnet_size = (0xffffffff >> new_prefix) + 1
         
         num_subnets = 2 ** (new_prefix - prefix)
-        
+        # 防止 /0→/32 这类请求生成 2^32 个子网对象，冻结 UI 甚至 OOM。
+        # 超限时返回空列表，由 GUI 给出"范围过大"提示。
+        if num_subnets > 4096:
+            return []
+
         for i in range(num_subnets):
             subnet_int = network_int + (i * subnet_size)
             broadcast_int = subnet_int | (0xffffffff >> new_prefix)

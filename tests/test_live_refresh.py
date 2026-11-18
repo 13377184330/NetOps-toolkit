@@ -44,14 +44,14 @@ page._data["vendor"] = "H3C"
 page.live_btn.click()
 app.processEvents()
 assert page.live_btn.isChecked(), "开启后应 checked"
-assert page.live_timer is not None and page.live_timer.isActive(), "timer 应激活"
+assert page._live_timer is not None and page._live_timer.isActive(), "timer 应激活"
 assert page.live_btn.text() == "实时: 开"
 print("PASS 2: 开启 → 30s 轮询 timer 激活")
 
 # 3) 关 → timer 停止
 page.live_btn.click()
 app.processEvents()
-assert page.live_timer is None and page.live_btn.text() == "实时: 关"
+assert page._live_timer is None and page.live_btn.text() == "实时: 关"
 print("PASS 3: 关闭 → timer 停止")
 
 # 4) _live_tick 空数据保护（直接调，串口占用场景静默跳过）

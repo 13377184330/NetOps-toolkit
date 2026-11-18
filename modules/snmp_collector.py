@@ -119,7 +119,13 @@ async def _walk_table(engine, community, version, target_ip, port, base_oid, tim
 
 
 def _sync(coro):
-    return _ensure_loop().run_until_complete(coro)
+    # 每次新建 loop 并在 finally 关闭：原实现用完即弃、从不 close()，
+    # 反复 SNMP 采集会累积未关闭的 loop（socket/句柄泄漏 + ResourceWarning）。
+    loop = _ensure_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _close_engine(engine):

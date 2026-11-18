@@ -56,11 +56,16 @@ def _load_or_create_key() -> bytes:
     # 类 Unix：用 os.open 的 mode 直接以 0o600 原子创建；Windows：mode 参数被忽略，稍后 ACL 收紧
     try:
         fd = os.open(_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        handed_off = False
         try:
-            with os.fdopen(fd, "wb") as f:
+            # fdopen 成功后 fd 归 with 管理；失败前仍需手动关闭。
+            f = os.fdopen(fd, "wb")
+            handed_off = True
+            with f:
                 f.write(key)
         except Exception:
-            os.close(fd)
+            if not handed_off:
+                os.close(fd)
             raise
     except FileExistsError:
         # 竞态条件：另一进程同时创建，重新读取

@@ -66,7 +66,9 @@ def check_health(raw: str, vendor: str = "h3c") -> dict:
         not all_admin_line, WARNING, "将 VTY 线路角色降为 network-operator，按需提权")
 
     # ---------- 3. 日志与审计 ----------
-    log_on = _has(t, r"^\s*info-center enable", re.M) or not _has(t, r"undo info-center enable", re.M)
+    # 只认「明确启用」行：原写法 `or not _has('undo info-center enable')`
+    # 在设备既未启用也未撤销时会判定为通过，漏报未配日志的设备。
+    log_on = _has(t, r"^\s*info-center enable", re.M)
     add("日志审计", "日志中心", "应启用 info-center 并配置日志主机", log_on, WARNING,
         "执行 info-center enable，并配置 info-center loghost <日志服务器IP>")
     ntp_on = _has(t, r"ntp-service unicast-server", re.M) or _has(t, r"^ntp server", re.M)

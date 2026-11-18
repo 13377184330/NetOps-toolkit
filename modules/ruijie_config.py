@@ -3,6 +3,18 @@
 """
 锐捷交换机配置生成器
 """
+import re
+from utils.net_addr import bgp_network_line
+
+
+def _tz_name_offset(timezone):
+    """`UTC+8`/`UTC-5` → (名称, 带符号小时)，供 IOS `clock timezone NAME HOURS`。"""
+    s = str(timezone).strip()
+    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
+    if m:
+        name, sign, h = m.group(1), m.group(2), int(m.group(3))
+        return name, -h if sign == "-" else h
+    return (s.replace(" ", "_") or "UTC"), 0
 
 
 class RuijieBasicGenerator:
@@ -69,18 +81,26 @@ class RuijieBasicGenerator:
         for server in servers:
             prefer = "prefer" if server.get("prefer") else ""
             lines.append(f"ntp server {server['ip']} {prefer}")
-        lines.append(f"clock timezone {timezone}")
+        # RGOS clock timezone 需「名称+偏移小时」，GUI 值是 UTC±N 字符串，
+        # 原实现直接拼 `clock timezone UTC-5`（缺偏移参数，设备拒绝）。
+        name, offset = _tz_name_offset(timezone)
+        lines.append(f"clock timezone {name} {offset}")
         return "\n".join(lines)
     
     @staticmethod
     def generate_snmp(version="2c", community_read=None, community_write=None,
                      location=None, contact=None, trap_enable=False, trap_host=None):
         lines = [f"snmp-server version {version}"]
-        
-        if community_read:
-            lines.append(f"snmp-server community {community_read} ro")
-        if community_write:
-            lines.append(f"snmp-server community {community_write} rw")
+        # community 属 v1/v2c，v3 用基于用户的安全模型，不应输出 community
+        # （华为/思科已按版本分流，此处同步）。
+        ver = str(version).lower()
+        if ver in ("v1", "v2", "v2c", "all", "2c"):
+            if community_read:
+                lines.append(f"snmp-server community {community_read} ro")
+            if community_write:
+                lines.append(f"snmp-server community {community_write} rw")
+        elif ver == "v3":
+            lines.append("! 注：SNMPv3 需配置 snmp-server user/group（GUI 暂不采集），请手工补充")
         if location:
             lines.append(f"snmp-server location {location}")
         if contact:
@@ -309,7 +329,7 @@ class RuijieRoutingGenerator:
         for peer in peers:
             lines.append(f" neighbor {peer['ip']} remote-as {peer['remote_as']}")
         for net in networks:
-            lines.append(f" network {net}")
+            lines.append(f" {bgp_network_line(net, style='ios')}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -333,6 +353,15 @@ class RuijieSecurityGenerator:
         
         for rule in rules:
             action = rule.get("action", "permit")
+            # IOS 标准 ACL 只能按源过滤，不允许协议/目的（否则整行被设备拒绝）
+            if str(acl_type).lower() in ("standard", "std"):
+                src = rule.get("source") or "any"
+                src_wc = rule.get("src_wildcard") or ""
+                line = f" {action} {src}"
+                if src != "any" and src_wc:
+                    line += f" {src_wc}"
+                lines.append(line)
+                continue
             proto = rule.get("protocol", "ip")
             src = rule.get("source", "any")
             src_wc = rule.get("src_wildcard", "")
@@ -413,13 +442,15 @@ class RuijieSecurityGenerator:
 
     @staticmethod
     def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
+        # GUI 该字段标签为「广播(pps)/组播(pps)」，是每秒包数；RGOS storm-control
+        # 用 `level pps <pps>` 精确表达（裸 level 是百分比 0-100，填 pps 值非法）。
         lines = [f"interface {interface}"]
         if broadcast:
-            lines.append(f" storm-control broadcast level {broadcast}")
+            lines.append(f" storm-control broadcast level pps {broadcast}")
         if multicast:
-            lines.append(f" storm-control multicast level {multicast}")
+            lines.append(f" storm-control multicast level pps {multicast}")
         if unicast:
-            lines.append(f" storm-control unicast level {unicast}")
+            lines.append(f" storm-control unicast level pps {unicast}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -498,11 +529,23 @@ class RuijieInterfaceGenerator:
     
     @staticmethod
     def generate_rate_limit(interface, rate_in=None, rate_out=None):
+        # GUI 入/出方向限速单位是 kbps（interface_tab SpinBox suffix="kbps"），
+        # 原实现错误地生成 `storm-control ... level {kbps}`（特性错+单位错）。
+        # 改用 CAR `rate-limit {in|out} <bps> <burst> <burst> conform/...`，
+        # kbps×1000 换算为 bps。
         lines = [f"interface {interface}"]
+        def _car(direction, kbps):
+            try:
+                bps = int(float(kbps)) * 1000
+            except (ValueError, TypeError):
+                return f" ! 注：限速值「{kbps}」无法解析，已跳过该方向"
+            burst = max(bps // 8, 1500)  # 约 1 秒突发量，下限一个以太网帧
+            return (f" rate-limit {direction} {bps} {burst} {burst} "
+                    "conform-action transmit exceed-action drop")
         if rate_in:
-            lines.append(f" storm-control broadcast level {rate_in}")
+            lines.append(_car("input", rate_in))
         if rate_out:
-            lines.append(f" storm-control multicast level {rate_out}")
+            lines.append(_car("output", rate_out))
         lines.append("!")
         return "\n".join(lines)
 
@@ -599,8 +642,7 @@ def generate_security_all(config: dict) -> str:
         parts.append(RuijieSecurityGenerator.generate_arp_inspection(
             ai.get("vlans"), ai.get("trusted_ports")))
     if "storm_controls" in config:
-        # 页签数值为 kbps；锐捷 storm-control level 单位为百分比，下发前请按平台换算核对
-        parts.append("# 注意：锐捷 storm-control level 为百分比单位，页签 kbps 值请换算后再下发")
+        # GUI 风暴抑制值为 pps，生成器已用 `storm-control ... level pps` 精确表达
         for st in config.get("storm_controls", []):
             parts.append(RuijieSecurityGenerator.generate_storm_control(
                 st["interface"], st.get("broadcast"), st.get("multicast"), st.get("unicast")))

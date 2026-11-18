@@ -385,29 +385,22 @@ class BaseDialog(QDialog):
 # ---------------------------------------------------------------- 统一消息框
 class _StyledMessageBox(BaseDialog):
     """info/warn/error/question 的统一载体：无边框同皮肤消息框。
-    图标用主题状态色圆点（非系统图标），文字纯文本。"""
 
-    _DOT = {"info": "accent", "warn": "warning", "error": "danger", "question": "accent"}
+    不放装饰图标色点：标题 + 正文文字已足够表达消息类型，色点既没有图例、
+    又跟标题栏的关闭红点撞色（实测被误读成"两个红点"），纯属噪声。
+    """
 
     def __init__(self, kind, title, text, buttons, default_text, parent=None):
         super().__init__(title, "", parent, min_width=420, scrollable=False)
         self._result_text = None
 
-        # 图标圆点 + 正文
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        dot = QLabel()
-        dot.setFixedSize(14, 14)
-        dot.setStyleSheet(
-            f"border-radius: 7px; background: {theme.t(self._DOT.get(kind, 'accent'))};")
-        row.addWidget(dot, 0, Qt.AlignTop)
+        # 正文直接占内容区（原先左侧那个按类型着色的圆点已移除）
         body = QLabel(text)
         body.setObjectName("dlgSubtitle")
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         body.setStyleSheet("font-size: 13px; color: #1F2A37; background: transparent;")
-        row.addWidget(body, 1)
-        self.content_layout().addLayout(row)
+        self.content_layout().addWidget(body)
         # 正文与按钮间的呼吸空间
         self.content_layout().addSpacing(2)
 

@@ -8,6 +8,22 @@
 switchport port-security/ACL ip access-list + ip access-group/MSTP/SNMP·NTP·syslog）
 交叉核验。消费与华为版生成器完全同构的 config dict，页签层零字段适配。
 """
+import re
+from utils.net_addr import bgp_network_line
+
+
+def _parse_timezone(timezone):
+    """`UTC+8`/`UTC-5` → (名称, 偏移小时)，供 IOS `clock timezone NAME HOURS` 使用。
+
+    无法解析时按原样返回名称 + 0，并在名称里保留原文以便人工核对，
+    避免再生成出缺少偏移参数的半截命令。
+    """
+    s = str(timezone).strip()
+    m = re.fullmatch(r"([A-Za-z]{1,5})([+-])(\d{1,2})", s)
+    if m:
+        name, sign, hours = m.group(1), m.group(2), int(m.group(3))
+        return name, -hours if sign == "-" else hours
+    return s.replace(" ", "_") or "UTC", 0
 
 
 class CiscoBasicGenerator:
@@ -75,17 +91,27 @@ class CiscoBasicGenerator:
             prefer = " prefer" if server.get("prefer") else ""
             lines.append(f"ntp server {server['ip']}{prefer}")
         if timezone:
-            lines.append(f"clock timezone {timezone}")
+            # IOS clock timezone 需要「名称 + 整数偏移小时」两个参数（如
+            # `clock timezone CST 8`）；GUI 值是 `UTC+8` 字符串，原实现直接
+            # 拼成 `clock timezone UTC+8`（缺参数，设备拒绝）。解析 ±N 补偏移。
+            name, hours = _parse_timezone(timezone)
+            lines.append(f"clock timezone {name} {hours}")
         return "\n".join(lines)
 
     @staticmethod
     def generate_snmp(version="2c", community_read=None, community_write=None,
                       location=None, contact=None, trap_enable=False, trap_host=None):
         lines = []
-        if community_read:
-            lines.append(f"snmp-server community {community_read} ro")
-        if community_write:
-            lines.append(f"snmp-server community {community_write} rw")
+        # community（v2c）只在 v2c/all 下生成；v3 用基于用户的安全模型，
+        # 不能输出 snmp-server community —— 与华为版 version 分流保持一致。
+        ver = str(version).lower()
+        if ver in ("v1", "v2", "v2c", "all", "1", "2", "2c"):
+            if community_read:
+                lines.append(f"snmp-server community {community_read} ro")
+            if community_write:
+                lines.append(f"snmp-server community {community_write} rw")
+        elif ver == "v3":
+            lines.append("! 注：SNMPv3 需配置 snmp-server user/group/view（GUI 暂不采集这些字段），请手工补充")
         if location:
             lines.append(f"snmp-server location {location}")
         if contact:
@@ -230,9 +256,17 @@ class CiscoVLANGenerator:
                 lines.append(f" switchport trunk native vlan {pvid}")
         elif vlan_type == "hybrid":
             # IOS 无 hybrid 端口类型：按 trunk 语义处理（NetCMD 五厂商对照同惯例）
+            # hybrid 接口在 GUI 里既不设 vlan_id 也不设 trunk_vlans，原实现
+            # 无条件拼 `allowed vlan {vlan_id}` 会输出非法字面量 `... None`。
             lines.append("! 注：IOS 无 hybrid 类型，已按 trunk 语义生成")
             lines.append(" switchport mode trunk")
-            lines.append(f" switchport trunk allowed vlan {vlan_id}")
+            # hybrid 场景：trunk_vlans 为 tagged VLAN 列表，pvid 为 native VLAN。
+            # 两者皆空时只输出 mode trunk，不生成 allowed/native 行（避免 None）。
+            allowed = _vlans_str(trunk_vlans)
+            if allowed:
+                lines.append(f" switchport trunk allowed vlan {allowed}")
+            if pvid:
+                lines.append(f" switchport trunk native vlan {pvid}")
         lines.append(" no shutdown")
         lines.append("!")
         return "\n".join(lines)
@@ -293,7 +327,7 @@ class CiscoRoutingGenerator:
         for peer in peers:
             lines.append(f" neighbor {peer['ip']} remote-as {peer['remote_as']}")
         for net in networks:
-            lines.append(f" network {net}")
+            lines.append(f" {bgp_network_line(net, style='ios')}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -316,6 +350,17 @@ class CiscoSecurityGenerator:
             lines.append(f" remark {description}")
         for rule in rules:
             action = rule.get("action", "permit")
+            # IOS 标准 ACL 只能按源地址过滤，不允许协议/目的/端口。
+            # GUI 的 standard 规则 protocol/destination 均为 None，经 _acl_rules
+            # 兜底成 ip/any 后会生成 `permit ip <src> <wc> any`——设备整行拒绝。
+            if str(acl_type).lower() in ("standard", "std"):
+                src = rule.get("source") or "any"
+                src_wc = rule.get("src_wildcard") or ""
+                line = f" {action} {src}"
+                if src != "any" and src_wc:
+                    line += f" {src_wc}"
+                lines.append(line)
+                continue
             proto = rule.get("protocol") or "ip"
             src = rule.get("source") or "any"
             src_wc = rule.get("src_wildcard") or ""
@@ -390,14 +435,17 @@ class CiscoSecurityGenerator:
 
     @staticmethod
     def generate_storm_control(interface, broadcast=None, multicast=None, unicast=None):
-        # 五厂商对照实锤：IOS storm-control level 为百分比单位
+        # 五厂商对照实锤：GUI 该字段标签为「广播(pps)/(组播(pps))」，
+        # 值是每秒包数；IOS storm-control level 裸数字才是百分比(0-100)，
+        # 直接把 pps 填进去会生成 level 5000 这类设备拒绝的命令。
+        # IOS 支持 `storm-control ... level pps <pps>` 精确表达 pps 语义。
         lines = [f"interface {interface}"]
         if broadcast:
-            lines.append(f" storm-control broadcast level {broadcast}")
+            lines.append(f" storm-control broadcast level pps {broadcast}")
         if multicast:
-            lines.append(f" storm-control multicast level {multicast}")
+            lines.append(f" storm-control multicast level pps {multicast}")
         if unicast:
-            lines.append(f" storm-control unicast level {unicast}")
+            lines.append(f" storm-control unicast level pps {unicast}")
         lines.append("!")
         return "\n".join(lines)
 
@@ -470,12 +518,25 @@ class CiscoInterfaceGenerator:
 
     @staticmethod
     def generate_rate_limit(interface, rate_in=None, rate_out=None):
-        # IOS 风暴抑制为 level 百分比；页签 kbps 值需换算（1000M 口：1% = 10000kbps）
+        # GUI 入口限速单位是 kbps（SpinBox suffix="kbps"），IOS rate-limit
+        # 命令用 bps。原实现把 kbps 塞进 storm-control level（百分比语义），
+        # 既单位错又命令错。改用 CAR：`rate-limit {in|out} <bps> <burst> <burst>
+        # conform-action transmit exceed-action drop`，kbps×1000 换算。
         lines = [f"interface {interface}"]
+        def _car(direction, kbps):
+            # 外部 JSON 恢复的限速值可能是字符串（含小数），int() 会抛
+            # ValueError 崩到生成线程；用 float 中转并兜底。
+            try:
+                bps = int(float(kbps)) * 1000
+            except (ValueError, TypeError):
+                return f" ! 注：限速值「{kbps}」无法解析，已跳过该方向"
+            burst = max(bps // 8, 1500)  # 约 1 秒突发量，下限一个以太网帧
+            return (f" rate-limit {direction} {bps} {burst} {burst} "
+                    "conform-action transmit exceed-action drop")
         if rate_in:
-            lines.append(f" storm-control broadcast level {rate_in}")
+            lines.append(_car("input", rate_in))
         if rate_out:
-            lines.append(f" storm-control multicast level {rate_out}")
+            lines.append(_car("output", rate_out))
         lines.append("!")
         return "\n".join(lines)
 
@@ -572,8 +633,7 @@ def generate_security_all(config: dict) -> str:
         parts.append(CiscoSecurityGenerator.generate_arp_inspection(
             ai.get("vlans"), ai.get("trusted_ports")))
     if "storm_controls" in config:
-        # 页签数值为 kbps；IOS storm-control level 为百分比，下发前请按端口带宽换算
-        parts.append("# 注意：IOS storm-control level 为百分比单位，页签 kbps 值请换算后再下发")
+        # GUI 风暴抑制值为 pps，生成器已用 IOS `storm-control ... level pps` 精确表达
         for st in config.get("storm_controls", []):
             parts.append(CiscoSecurityGenerator.generate_storm_control(
                 st["interface"], st.get("broadcast"), st.get("multicast"), st.get("unicast")))

@@ -210,7 +210,8 @@ class AuditManager:
     
     def get_statistics(self, days: int = 30) -> Dict:
         """获取审计统计信息"""
-        cutoff = datetime.now().strftime("%Y-%m-%d")
+        # 原实现 cutoff 恒为今天，days 参数形同虚设（永远只统计当天日志）。
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         recent_logs = [l for l in self.logs if l.timestamp >= cutoff]
         
         action_counts = {}

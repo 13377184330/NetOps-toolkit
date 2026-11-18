@@ -274,9 +274,22 @@ class SubnetCalculatorWidget(QWidget):
         if new_prefix <= orig_prefix:
             warn_box(self, "警告", "新前缀必须大于原前缀")
             return
-        
-        result = SubnetCalculator.split_subnet(network, orig_prefix, new_prefix)
-        
+
+        # 划分数量过大（如 /0→/32）会在核心函数被拦截返回空，
+        # 这里给出可读提示，避免用户误以为"没反应"。
+        if (1 << (new_prefix - orig_prefix)) > 4096:
+            warn_box(self, "警告",
+                     f"划分数量过多（2^{new_prefix - orig_prefix} 个子网），"
+                     "请缩小前缀差（最多 4096 个子网）")
+            return
+
+        try:
+            result = SubnetCalculator.split_subnet(network, orig_prefix, new_prefix)
+        except (ValueError, IndexError) as exc:
+            # 非法网络串（如 abc、999.1.1.1）底层会抛异常，槽函数无兜底会崩
+            warn_box(self, "警告", f"网络地址无效：{exc}")
+            return
+
         if result:
             subnets = result
             # 填表期间关排序（开着会边填边跳行），填完再开
@@ -304,8 +317,12 @@ class SubnetCalculatorWidget(QWidget):
         start_ip = self.cidr_start.text().strip()
         end_ip = self.cidr_end.text().strip()
         
-        result = SubnetCalculator.ip_range_to_cidr(start_ip, end_ip)
-        
+        try:
+            result = SubnetCalculator.ip_range_to_cidr(start_ip, end_ip)
+        except (ValueError, IndexError) as exc:
+            warn_box(self, "警告", f"IP 范围无效：{exc}")
+            return
+
         if result:
             cidrs = result
             self.cidr_table.setSortingEnabled(False)  # 填表期间关排序

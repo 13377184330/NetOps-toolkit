@@ -100,7 +100,9 @@ class ConfigValidator:
                     suggestion="建议使用cipher加密密码"
                 ))
             
-            if re.search(r'password\s+\d*\s*(admin|123456|password)', line, re.I):
+            # 兼容 `password simple admin` / `password cipher 123456` 等写法，
+            # 原正则不识别 simple/cipher 前缀，真实弱口令漏检。
+            if re.search(r'password\s+(?:simple\s+|cipher\s+)?\d*\s*(admin|123456|password|huawei|h3c|cisco)\b', line, re.I):
                 self.errors.append(ValidationResult(
                     is_valid=False, level="error",
                     message="使用弱密码",

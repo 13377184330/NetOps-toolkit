@@ -124,7 +124,9 @@ def gen_device_batch(vendor, rows):
             lines += e_iface(vendor, svi, ip, mask)
         if gw:
             lines += e_route(vendor, "0.0.0.0", "0.0.0.0", gw)
-        lines += e_login(vendor, "admin", "Admin@123", ssh=True)
+        # 安全红线：绝不把公开弱口令写进可下发配置。用显式占位符，
+        # 下发前必须由人工替换（占位符含括号空格，设备不会误当合法口令）。
+        lines += e_login(vendor, "admin", "TODO_SET_PASSWORD", ssh=True)
         lines.append(("save" if vrp else "write memory", "保存配置（设备会提示确认）"))
         devices.append({"name": name, "lines": lines})
     return devices

@@ -182,8 +182,12 @@ def _add_vlan(neutral, vid):
 def _norm_mask(m):
     if re.fullmatch(r"\d{1,2}", m):
         bits = int(m)
-        return ".".join(str((((0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF) >> ((3 - i) * 8)) & 0xFF)
-                        for i in range(4))
+        # 前缀长度合法范围 0-32；33~99 会让 32-bits 为负并抛 ValueError，
+        # 用户粘贴错误配置时不应让整个转换功能崩溃。越界原样返回并留待报告。
+        if 0 <= bits <= 32:
+            return ".".join(str((((0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF) >> ((3 - i) * 8)) & 0xFF)
+                            for i in range(4))
+        return m
     return m
 
 
@@ -244,7 +248,8 @@ def convert(text: str, src_vendor: str, dst_vendor: str) -> dict:
 
     if n["ssh"] or n["telnet"] or n["users"]:
         user = n["users"][0] if n["users"] else "admin"
-        lines += e_login(dst_vendor, user, "Admin@123",
+        # 安全红线：占位符代替公开弱口令，report 已提示需重设
+        lines += e_login(dst_vendor, user, "TODO_SET_PASSWORD",
                          ssh=n["ssh"], telnet=n["telnet"] and not n["ssh"])
         report.append(f"登录服务（账号 {user}，密码为占位符，需重设）")
 

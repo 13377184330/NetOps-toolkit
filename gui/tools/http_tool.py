@@ -120,10 +120,11 @@ class BatchHTTPCheckWorker(QThread):
     result_ready = pyqtSignal(list)
     progress_update = pyqtSignal(str, int)
     
-    def __init__(self, urls, timeout=10):
+    def __init__(self, urls, timeout=10, check_ssl=True):
         super().__init__()
         self.urls = urls
         self.timeout = timeout
+        self.check_ssl = check_ssl
     
     def run(self):
         results = []
@@ -149,7 +150,7 @@ class BatchHTTPCheckWorker(QThread):
             
             try:
                 start_time = datetime.now()
-                response = requests.get(url, timeout=self.timeout, allow_redirects=True, verify=False)
+                response = requests.get(url, timeout=self.timeout, allow_redirects=True, verify=self.check_ssl)
                 end_time = datetime.now()
                 duration = (end_time - start_time).total_seconds() * 1000
                 
@@ -394,7 +395,8 @@ class HTTPStatusWidget(QWidget):
         self.status_bar.setStyleSheet(TOOL_STATUS_INFO)
         self.status_bar.setText("批量检测中...")
         
-        self.batch_worker = BatchHTTPCheckWorker(urls, self.timeout_spin.value())
+        self.batch_worker = BatchHTTPCheckWorker(urls, self.timeout_spin.value(),
+                                                  self.check_ssl_cb.isChecked())
         self.batch_worker.result_ready.connect(self.on_batch_result)
         self.batch_worker.progress_update.connect(self.on_batch_progress)
         self.batch_worker.finished.connect(lambda: self.batch_check_btn.setEnabled(True))

@@ -127,10 +127,11 @@ def suggest_free(cidr: str) -> str:
     if rec is None:
         return ""
     used = {u["ip"] for u in rec["used"]}
-    hosts = list(ipaddress.ip_network(net).hosts())
-    if len(hosts) > 1:
-        hosts = hosts[1:]   # 第一个 host 位留作网关（学校惯例）
-    for h in hosts:
+    # 惰性遍历，找到第一个未用 IP 即返回。原实现 `list(network.hosts())`
+    # 会把 /8 的 1600 万个主机一次性物化（7s+ 卡顿 / 高内存 / 可能 OOM）。
+    for idx, h in enumerate(ipaddress.ip_network(net).hosts()):
+        if idx == 0:
+            continue  # 第一个 host 位留作网关（学校惯例）
         if str(h) not in used:
             return str(h)
     return ""
@@ -143,7 +144,7 @@ def list_subnets() -> list:
     for s in data["subnets"]:
         try:
             net = ipaddress.ip_network(s["subnet"])
-            total = net.num_addresses - 2
+            total = max(0, net.num_addresses - 2)  # /31 /32 无常规主机位，不出现负数
         except ValueError:
             total = 0
         used_n = len(s.get("used", []))
