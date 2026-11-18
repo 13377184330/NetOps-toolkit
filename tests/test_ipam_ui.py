@@ -36,7 +36,7 @@ w._add()
 app.processEvents()
 assert w.table.rowCount() == 1, f"应 1 行，实际 {w.table.rowCount()}"
 assert "192.168.10.0/24" == w.table.item(0, 0).text()
-assert "标记行已同步网段下拉" and w.subnet_combo.count() == 1
+assert w.subnet_combo.count() == 1, "标记行已同步网段下拉"
 assert "已登记" in w.hint.text()
 print("PASS 1: 登记（1/24 规范化 → 0/24）+ 表格/下拉同步")
 

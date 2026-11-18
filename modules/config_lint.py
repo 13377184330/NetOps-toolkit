@@ -19,13 +19,23 @@ except ImportError:  # 直接运行本文件做自测时，把项目根目录补
     _sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
     from modules.config_visualizer import expand_vlan_body
 
-# ACL 定义行：覆盖 VRP `acl (basic|advanced|number) N`（也兼容 `acl N` 简写）
-# 与 IOS `access-list N` / `ip access-list (extended|standard) N|名称`。
-# 捕获组 1 = ACL 标识（编号或名称），供 acl_refs 的引用一致性核对。
-# 锚定行首，避免把注释/描述里出现的 "acl" 字样误当定义。
+# ACL 定义行，锚定行首避免误匹配注释。修饰词全部作为可选前缀，
+# 真正的 ACL 标识总是行末 token（编号或名称）。覆盖：
+#   VRP: acl N / acl number|basic|advanced|name N / acl ipv6 [number] N
+#   IOS: access-list N / ip access-list extended|standard N|名称
 _ACL_DEF_RE = re.compile(
-    r"^\s*(?:acl\s+(?:(?:basic|advanced|number)\s+)?([\w-]+)"
+    r"^\s*(?:acl\s+(?:ipv6\s+)?(?:(?:basic|advanced|number|name)\s+)?([\w-]+)"
     r"|(?:ip\s+)?access-list\s+(?:(?:extended|standard)\s+)?([\w-]+))",
+    re.I,
+)
+
+# ACL 引用行：VRP `packet-filter N [inbound]` / `traffic-filter inbound|outbound acl N`，
+# IOS `ip access-group N|名称 in|out`。方向词可能在标识前（traffic-filter）或后，
+# 前置方向词与可选 acl 关键字都要跳过，否则会把 `inbound` 误当 ACL 名。
+_ACL_REF_RE = re.compile(
+    r"(?:packet-filter|traffic-filter|ip\s+access-group)\s+"
+    r"(?:(?:inbound|outbound|in|out)\s+)?(?:acl\s+)?"
+    r"(?!(?:inbound|outbound)\b)([\w-]+)",
     re.I,
 )
 
@@ -149,7 +159,7 @@ def lint(text: str, vendor: str) -> dict:
         if m:
             acl_defined.add((m.group(1) or m.group(2)).lower())
             continue
-        m = re.search(r"(?:packet-filter|traffic-filter|ip\s+access-group)\s+(?:acl\s+)?([\w-]+)", low)
+        m = _ACL_REF_RE.search(low)
         if m:
             acl_refs.setdefault(m.group(1).lower(), []).append(i)
 

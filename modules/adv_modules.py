@@ -198,6 +198,10 @@ def gen_nat(vendor, p):
             (f" nat outbound {acl}", "匹配 ACL 的流量用出接口地址做转换"),
         ]
     wild = _mask_to_wildcard(mask)
+    if not wild:
+        # 非法掩码不静默生成错误 ACL：给出明显提示，避免配出与意图不符的规则
+        return [(_view(vendor), "进入配置模式"),
+                ("!", f"⚠ 内网掩码「{mask}」非法，未生成 NAT ACL；请填 255.255.255.0 形式的合法掩码")]
     return [
         (_view(vendor), "进入配置模式"),
         (f"access-list {acl} permit {net} {wild}", f"允许内网 {net} 做 NAT（IOS 用反掩码）"),
@@ -257,11 +261,14 @@ def gen_stp(vendor, p):
 
 
 def _mask_to_wildcard(mask):
+    """点分掩码 → 反掩码；非法输入返回 None（不静默兜底成看似合法的值）。"""
     try:
-        parts = [int(x) for x in mask.split(".")]
+        parts = [int(x) for x in str(mask).strip().split(".")]
+        if len(parts) != 4 or any(x < 0 or x > 255 for x in parts):
+            return None
         return ".".join(str(255 - x) for x in parts)
-    except Exception:
-        return "0.0.0.255"
+    except (ValueError, AttributeError):
+        return None
 
 
 def _norm_mac(mac):

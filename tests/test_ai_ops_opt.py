@@ -22,7 +22,9 @@ partial = ("好的：\n```netcfg\nsystem-view # 进入系统视图\n"
 tab._on_stream_failed("连接失败：测试模拟", "gen", "huawei", "创建vlan10 20", partial)
 assert len(tab._cards) == 2, f"部分内容应入队 2 条，实际 {len(tab._cards)}"
 assert all(c["source"] == "AI（部分）" for c in tab._cards), "来源应标记 AI（部分）"
-assert "保留部分生成内容" in tab.status_label.text() or True  # status 文案不强制
+# 部分失败提示写在 _sys_line（"已保留部分生成内容"），不在 status_label；
+# 原断言对象错误且 `or True` 恒真。入队内容与来源已在上两行真实断言，
+# 此处不再伪装 status 校验。
 print("[1] 流式部分失败：保留已生成 2 条命令入队 OK:", [c["cmd"] for c in tab._cards])
 
 # 2) 命令编辑底层：风险重分类 + 注释重新解析

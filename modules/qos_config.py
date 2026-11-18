@@ -212,6 +212,8 @@ class QoSConfigGenerator:
             if dest != "any":
                 dst_wildcard = rule.get("destination_wildcard", "0.0.0.0")
                 rule_str += f" destination {dest} {dst_wildcard}"
+            if src_port and protocol in ["tcp", "udp"]:
+                rule_str += f" source-port eq {src_port}"
             if dst_port and protocol in ["tcp", "udp"]:
                 rule_str += f" destination-port eq {dst_port}"
             if dscp:

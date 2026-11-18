@@ -11,7 +11,9 @@ import re
 
 # 意图构建被容错吞掉时记录在此，供排查「说了却没生成命令」的问题。
 # 保留容错（用户说错话不该让引擎崩），但不再静默丢弃根因。
-LAST_PARSE_ERRORS = []
+# 用有界 deque：长会话反复触发时不会无限增长造成内存泄漏。
+from collections import deque
+LAST_PARSE_ERRORS = deque(maxlen=100)
 
 VENDORS = ("huawei", "h3c", "ruijie", "maipu", "cisco")
 VENDOR_CN = {"huawei": "华为", "h3c": "H3C", "ruijie": "锐捷",
@@ -606,7 +608,7 @@ def parse(text: str, vendor: str):
             except Exception as exc:
                 # 保留容错语义，但记录被吞的错误：否则 build 里的 bug
                 # （如 re.search(...).group(1) 未判空）会静默让意图消失。
-                LAST_PARSE_ERRORS.append((it["key"], seg, repr(exc)))
+                LAST_PARSE_ERRORS.append((it.get("key", "<unknown>"), seg, repr(exc)))
                 continue
         if hit:
             # 路由去重（分句可能重复命中）

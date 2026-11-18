@@ -91,8 +91,9 @@ try:
     with open(ip.IPAM_FILE, "w", encoding="utf-8") as f:
         f.write("{BROKEN")
     ip._load()
+    import glob
     case("F4c 损坏账本已备份不静默丢数据",
-         os.path.exists(ip.IPAM_FILE + ".corrupt"))
+         len(glob.glob(ip.IPAM_FILE + ".*.corrupt")) >= 1)
 finally:
     ip.IPAM_FILE = orig
     shutil.rmtree(d, ignore_errors=True)
@@ -115,6 +116,68 @@ try:
 finally:
     cc._KEY_FILE = orig_keyfile
     shutil.rmtree(d, ignore_errors=True)
+
+# ---- 第六轮：config_lint ACL 全语法 ----
+def _acl_miss(cfg, v):
+    return [x["issue"] for x in lint(cfg, v)["items"] if "不存在的 ACL" in x["issue"]]
+vrp_variants = [
+    ("acl 3000", "packet-filter 3000 inbound"),
+    ("acl number 3000", "packet-filter 3000 inbound"),
+    ("acl name WEB", "packet-filter WEB inbound"),
+    ("acl ipv6 3000", "traffic-filter inbound acl 3000"),
+    ("acl ipv6 number 3000", "traffic-filter outbound acl 3000"),
+    ("acl advanced 3000", "traffic-filter inbound acl 3000"),
+]
+for defin, ref in vrp_variants:
+    cfg = f"{defin}\n!\ninterface GE0/1\n {ref}\n"
+    case(f"G1 {defin} + {ref}", len(_acl_miss(cfg, "huawei")) == 0, str(_acl_miss(cfg, "huawei")))
+case("G1x VRP真不存在ACL仍报错",
+     len(_acl_miss("interface GE0/1\n traffic-filter inbound acl 3999\n", "huawei")) == 1)
+
+# ---- 第六轮：credential 备份失败仍自愈 ----
+import shutil as _sh
+d = tempfile.mkdtemp(); kf = os.path.join(d, "secret.key")
+open(kf, "wb").write(b"short-bad-key")
+cc._KEY_FILE = kf
+_orig_copy = _sh.copy2
+_sh.copy2 = lambda *a, **k: (_ for _ in ()).throw(OSError("模拟备份失败"))
+try:
+    k = cc._load_or_create_key()
+    Fernet(k)
+    case("G2 密钥备份失败仍返回合法key", len(k) == 44)
+finally:
+    _sh.copy2 = _orig_copy; cc._KEY_FILE = orig_keyfile; shutil.rmtree(d, ignore_errors=True)
+
+# ---- 第六轮：ipam 结构损坏 + 多次备份 ----
+d = tempfile.mkdtemp(); import glob as _glob
+orig_ip = ip.IPAM_FILE; ip.IPAM_FILE = os.path.join(d, "ipam.json")
+try:
+    open(ip.IPAM_FILE, "w").write("[]")   # 合法 JSON 但结构错
+    ip._load()
+    ip.add_subnet("10.0.0.0/24")
+    case("G3 结构损坏账本可自愈", len(ip.list_subnets()) == 1)
+    open(ip.IPAM_FILE, "w").write("{BAD1")
+    ip._load()
+    open(ip.IPAM_FILE, "w").write("{BAD2")
+    ip._load()
+    case("G3b 多次损坏备份不互相覆盖",
+         len(_glob.glob(ip.IPAM_FILE + ".*.corrupt")) >= 2)
+finally:
+    ip.IPAM_FILE = orig_ip; shutil.rmtree(d, ignore_errors=True)
+
+# ---- 第六轮：nl_engine 错误记录有界 ----
+import modules.nl_engine as _nl
+_nl.LAST_PARSE_ERRORS.clear()
+for _ in range(200):
+    _nl.parse("创建用户 用户名：@@@", "huawei")
+case("G4 解析错误记录有界(maxlen=100)", len(_nl.LAST_PARSE_ERRORS) <= 100,
+     f"长度={len(_nl.LAST_PARSE_ERRORS)}")
+
+# ---- 第六轮：source_port 不再静默漏配 ----
+from modules.qos_config import QoSConfigGenerator as _Q
+qsrc = str(_Q.generate_acl_qos("3000", [{"id": 5, "protocol": "tcp", "source": "1.1.1.1",
+                                         "source_port": 1234, "dest_port": 80, "dscp": 10}]))
+case("G5 QoS规则输出source-port", "source-port eq 1234" in qsrc, qsrc[:160])
 
 n_pass = sum(1 for _, ok, _ in results if ok)
 print("\n" + "=" * 68)

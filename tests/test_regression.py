@@ -45,7 +45,9 @@ print("[3] 工具箱", tw.stack.count(), "页可构建")
 # 4) 原有引擎不回退：nl_engine / config_lint / 跨厂商转换冒烟
 from modules import nl_engine
 r = nl_engine.parse("创建vlan10 20，把gi1/0/1划入vlan10，GE1/0/24做trunk放行vlan 10 20", "h3c")
-assert any("vlan 10 to 20" in c for c, _ in r["lines"]) or r["lines"], r["intents"]
+# 真实输出为 H3C `port trunk permit vlan 10 20`（无 `vlan 10 to 20`）；
+# 原断言写错语法又加 `or r["lines"]` 兜底，导致恒真、永不失败。
+assert any("port trunk permit vlan 10 20" in c for c, _ in r["lines"]), r["lines"]
 assert r["intents"], "nl_engine 退化"
 from modules.config_lint import lint
 res = lint("sysname SW1\ninterface Vlan-interface10\n ip address 192.168.10.1 255.255.255.0", "h3c")

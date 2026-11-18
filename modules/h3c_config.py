@@ -377,6 +377,8 @@ class H3CConfigGenerator:
                             rule_line += f" source {src}"
                         if dst:
                             rule_line += f" destination {dst}"
+                        if sport and protocol.lower() in ("tcp", "udp"):
+                            rule_line += f" source-port eq {sport}"
                         if dport:
                             rule_line += f" destination-port eq {dport}"
                     

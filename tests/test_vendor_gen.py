@@ -157,8 +157,11 @@ for idx, exp in EXPECT.items():
     case(f"{v}5 头部标题为{nm}脚本", exp["header"] in win.preview_text.toPlainText(),
          "" if exp["header"] in win.preview_text.toPlainText()
          else f"期望「{exp['header']}」，实际头部: " + (win.preview_text.toPlainText().splitlines()[1] if len(win.preview_text.toPlainText().splitlines()) > 1 else ""))
-    case(f"{v}6 成功弹窗/状态栏反馈", any(p["title"] == "成功" for p in popups) or True,
-         "生成完成有弹窗反馈" if any(p["title"] == "成功" for p in popups) else "（弹窗已 patch，仅记录）")
+    # 原断言 `... or True` 恒真。弹窗入口已 patch 但完整记录到 popups，
+    # 可直接断言生成成功确实产生了「成功」反馈。
+    _has_success = any(p["title"] == "成功" for p in popups)
+    case(f"{v}6 成功弹窗/状态栏反馈", _has_success,
+         "生成完成有弹窗反馈" if _has_success else f"popups={popups}")
     if exp.get("iface_kw"):
         case(f"{v}7 接口VLAN语法符合{nm}", exp["iface_kw"] in out,
              "" if exp["iface_kw"] in out else f"期望「{exp['iface_kw']}」未命中")

@@ -2,6 +2,7 @@
 import os
 import stat
 import sys
+import shutil
 import subprocess
 from cryptography.fernet import Fernet
 
@@ -39,51 +40,46 @@ def _lock_permissions(path: str):
             pass
 
 
+def _valid_key(key: bytes) -> bool:
+    """校验是否为合法 Fernet 密钥（32 字节 url-safe base64）。"""
+    try:
+        Fernet(key)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def _load_or_create_key() -> bytes:
     """加载或创建加密密钥，确保文件权限安全（仅当前用户可读写）"""
     key_dir = os.path.dirname(_KEY_FILE)
     os.makedirs(key_dir, exist_ok=True)
 
     if os.path.exists(_KEY_FILE):
-        # 现有密钥：校正权限（历史遗留的宽权限文件也一并收紧）
         _lock_permissions(_KEY_FILE)
         with open(_KEY_FILE, "rb") as f:
             key = f.read().strip()
-        # 损坏的密钥（磁盘满/写入中断/手工误改）若在导入期直接交给
-        # Fernet() 会抛 ValueError，导致整个设备模块链无法导入。
-        # 校验失败则备份坏文件并重新生成（旧密文将不可解，需告知用户）。
-        try:
-            Fernet(key)
+        if _valid_key(key):
             return key
-        except (ValueError, TypeError):
-            # 坏密钥：备份后 fall-through 到下方统一的新密钥生成/落盘路径
-            try:
-                import shutil
-                shutil.move(_KEY_FILE, _KEY_FILE + ".corrupt")
-            except OSError:
-                pass
-
-    # 创建新密钥（首次创建，或坏密钥备份后重建）——只在此处生成一次
-    key = Fernet.generate_key()
-
-    # 类 Unix：用 os.open 的 mode 直接以 0o600 原子创建；Windows：mode 参数被忽略，稍后 ACL 收紧
-    try:
-        fd = os.open(_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        handed_off = False
+        # 坏密钥：尽力备份（失败不影响后续覆盖），然后生成新 key 直接覆盖。
+        # 关键是绝不让坏 key 继续流向模块级 Fernet()，否则导入期崩溃。
         try:
-            # fdopen 成功后 fd 归 with 管理；失败前仍需手动关闭。
-            f = os.fdopen(fd, "wb")
-            handed_off = True
-            with f:
-                f.write(key)
-        except Exception:
-            if not handed_off:
-                os.close(fd)
-            raise
-    except FileExistsError:
-        # 竞态条件：另一进程同时创建，重新读取
-        with open(_KEY_FILE, "rb") as f:
-            return f.read().strip()
+            shutil.copy2(_KEY_FILE, _KEY_FILE + ".corrupt")
+        except OSError:
+            pass
+
+    key = Fernet.generate_key()
+    # 直接覆盖写：无论是首次创建还是坏密钥重建，都不依赖文件是否已移走，
+    # 避免 O_EXCL 竞态分支又把旧坏 key 读回来。
+    fd = os.open(_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    handed_off = False
+    try:
+        f = os.fdopen(fd, "wb")
+        handed_off = True
+        with f:
+            f.write(key)
+    finally:
+        if not handed_off:
+            os.close(fd)
 
     _lock_permissions(_KEY_FILE)
     return key

@@ -71,12 +71,21 @@ case("M6 超大子网划分被拦截", big == [], f"返回 {len(big)} 条")
 ok_split = SC.split_subnet("192.168.0.0", 24, 26)
 case("M6b 正常子网划分仍可用", len(ok_split) == 4)
 
-# GUI 层：ai_ops 取消下发 / topology timer 属性名（用源码断言，避免无显示环境挂起）
-ai_src = open(os.path.join(ROOT, "gui", "tabs", "ai_ops_tab.py"), encoding="utf-8").read()
-case("M7 _select_devices 检查 exec_ 返回值",
-     "if not dlg.exec_():" in ai_src and "return []" in ai_src)
-tp_src = open(os.path.join(ROOT, "gui", "tabs", "topology_tab.py"), encoding="utf-8").read()
-case("M8 拓扑 timer 统一用 _live_timer", "self.live_timer" not in tp_src)
+# GUI 层：ai_ops 取消设备选择必须返回空列表（真实行为测试，不再读源码文本）
+from PyQt5.QtWidgets import QApplication
+_app = QApplication.instance() or QApplication([])
+import gui.dialogs.base as _db
+from gui.tabs.ai_ops_tab import AIOpsTab
+_ai = AIOpsTab()
+_orig_exec = _db.BaseDialog.exec_
+_db.BaseDialog.exec_ = lambda self: 0   # 模拟用户点「取消」
+try:
+    _devices = _ai._select_devices([({"id": "1", "name": "sw", "ip": "1.1.1.1"}, True)])
+    case("M7 取消设备选择返回空列表(不下发)", _devices == [], str(_devices))
+finally:
+    _db.BaseDialog.exec_ = _orig_exec
+# M8（拓扑 timer 统一用 _live_timer）已由 test_live_refresh 用真实对象行为覆盖，
+# 此处不再用源码文本断言重复一遍弱测试。
 
 n_pass = sum(1 for _, ok, _ in results if ok)
 print("\n" + "=" * 68)

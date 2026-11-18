@@ -15,20 +15,36 @@ from utils.app_paths import app_root
 IPAM_FILE = os.path.join(app_root(), "config", "ipam.json")
 
 
+def _backup_corrupt():
+    """把损坏账本另存为带时间戳的 .corrupt，避免多次损坏互相覆盖。"""
+    try:
+        import shutil
+        from datetime import datetime
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        shutil.copy2(IPAM_FILE, IPAM_FILE + "." + stamp + ".corrupt")
+    except OSError:
+        pass
+
+
 def _load():
     if os.path.exists(IPAM_FILE):
+        data = None
         try:
             with open(IPAM_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
         except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-            # 账本损坏（写入中断/手工误改）绝不能静默当成空账本——那样
-            # 下一次 _save 会用空数据覆盖原文件，用户的所有登记全部丢失。
-            # 备份坏文件后返回空账本，让用户有机会从 .corrupt 找回数据。
-            try:
-                import shutil
-                shutil.move(IPAM_FILE, IPAM_FILE + ".corrupt")
-            except OSError:
-                pass
+            data = None
+        # 不仅校验 JSON 语法，也校验结构：合法 JSON 但非 dict / 缺
+        # subnets 列表同样属损坏，否则后续 data["subnets"] 会崩 UI。
+        if isinstance(data, dict) and isinstance(data.get("subnets"), list):
+            return data
+        _backup_corrupt()
+        # 损坏绝不能当空账本继续：下一次 _save 会覆盖原文件导致数据全丢。
+        # 先把坏文件挪开（copy 已留档），再返回空账本重建。
+        try:
+            os.remove(IPAM_FILE)
+        except OSError:
+            pass
     return {"subnets": []}
 
 
