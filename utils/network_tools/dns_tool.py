@@ -131,7 +131,7 @@ class DNSTool:
             output, _ = process.communicate(timeout=10)
             return output
             
-        except:
+        except Exception:  # C-B2: 收窄捕获，避免吞掉 KeyboardInterrupt/SystemExit
             return None
     
     @staticmethod
@@ -323,7 +323,7 @@ class NetworkInfo:
             local_ip = s.getsockname()[0]
             s.close()
             return local_ip
-        except:
+        except Exception:  # C-B2: 收窄捕获，避免吞掉 KeyboardInterrupt/SystemExit
             return "127.0.0.1"
     
     @staticmethod
@@ -368,7 +368,7 @@ class NetworkInfo:
                             result["ip"] = ip
                             result["success"] = True
                             break
-                except:
+                except Exception:  # C-B2: 收窄捕获，避免吞掉 KeyboardInterrupt/SystemExit
                     continue
             
         except Exception as e:
@@ -400,7 +400,7 @@ class NetworkInfo:
                             "ip": ip,
                             "hostname": hostname
                         })
-            except:
+            except Exception:  # C-B2: 收窄捕获，避免吞掉 KeyboardInterrupt/SystemExit
                 pass
                 
         except Exception as e:
