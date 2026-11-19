@@ -157,7 +157,16 @@ def stream_chat(messages, on_delta=None, config=None, timeout=(10, 120)):
         # 脱敏后入日志，但 UI 返回也要脱敏（异常串可能带 Authorization 头/URL 里的 key）
         logger.error("AI 接口调用异常: %s", _sanitize(e))
         return "".join(chunks), _sanitize(f"{type(e).__name__}: {e}")
-    return "".join(chunks), None
+    full = "".join(chunks)
+    # 网关/模型故障防御：流式响应疑似工具调用内部标记泄露（<｜DSML｜ / <｜tool_calls｜
+    # 类，全角竖线为特征）且无任何代码块时按异常响应报错，不把乱码标记渲染进聊天区。
+    # 实测：api.inxk.com 的 deepseek-v4.1-flash 在窗口期持续泄露 bash 工具调用标记，
+    # 正文完全跑偏——透传给用户是一屏乱码，无从下手。
+    if full and "```" not in full and _TOOLCALL_LEAK_RE.search(full):
+        logger.warning("AI 流式返回疑似工具调用标记泄露（%d 字符，不透传）", len(full))
+        return "", ("AI 服务返回了异常响应（疑似模型工具调用标记泄露），请重试；"
+                    "若持续出现，请更换模型或服务商")
+    return full, None
 
 
 def test_connection(config=None):
@@ -255,6 +264,8 @@ def classify_command(cmd: str) -> str:
 # 避免 ai_ops_tab 重复定义导致两处口径漂移
 CMD_FENCE_RE = re.compile(r"```(?:netcfg|cli|bash|shell)?[ \t]*\r?\n(.*?)```", re.S)
 _NOTE_RE = re.compile(r"\s+#\s*(?=\S)(.+)$")
+# 工具调用内部标记特征：<｜DSML｜ / <｜tool_calls｜（全角竖线）——正常正文不会出现
+_TOOLCALL_LEAK_RE = re.compile(r"<｜")
 
 
 def split_cmd_note(line: str):

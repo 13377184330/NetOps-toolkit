@@ -98,4 +98,36 @@ full, err = ai_ops.stream_chat([{"role": "user", "content": "hi"}], config=empty
 assert err and "未配置" in err, f"未配置时应有中文错误提示，实际: {err!r}"
 print("[7] 未配置提示 OK:", err)
 
+# 8) 网关工具调用标记泄露防御：流式返回纯 <｜DSML｜> 标记时报错不透传；正常流不受影响
+import json as _json
+class _FakeResp:
+    status_code = 200
+    encoding = "utf-8"
+    def __init__(self, lines): self._lines = lines
+    def iter_lines(self, decode_unicode=True): return iter(self._lines)
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+_cfg = {"base_url": "http://x/v1", "model": "m", "api_key": "k", "configured": True}
+_dsml_lines = [
+    "data: " + _json.dumps({"choices": [{"delta": {"content": "<｜DSML｜ calls>"}}]}, ensure_ascii=False),
+    "data: " + _json.dumps({"choices": [{"delta": {"content": "<｜DSML｜ invoke name=\"bash\">ls -la"}}]}, ensure_ascii=False),
+    "data: [DONE]",
+]
+_ok_lines = [
+    "data: " + _json.dumps({"choices": [{"delta": {"content": "```netcfg\nvlan 10\n```"}}]}, ensure_ascii=False),
+    "data: [DONE]",
+]
+_real_post = ai_ops.requests.post
+try:
+    ai_ops.requests.post = lambda *a, **k: _FakeResp(_dsml_lines)
+    full, err = ai_ops.stream_chat([{"role": "user", "content": "x"}], config=_cfg)
+    assert err and "异常响应" in err and not full, (full, err)
+    ai_ops.requests.post = lambda *a, **k: _FakeResp(_ok_lines)
+    full2, err2 = ai_ops.stream_chat([{"role": "user", "content": "x"}], config=_cfg)
+    assert not err2 and "vlan 10" in full2, (full2, err2)
+finally:
+    ai_ops.requests.post = _real_post
+print("[8] 工具调用标记泄露防御 OK:", err)
+
 print("\n=== 全部冒烟通过 ===")
