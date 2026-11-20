@@ -23,6 +23,7 @@ from gui.tools.http_tool import HTTPStatusWidget
 from gui.tools.password_tool import PasswordGeneratorWidget
 from gui.tools.encoder_tool import EncoderToolWidget
 from gui.tools.mac_tool import MACToolWidget
+from gui.tools.arp_scan_tool import ArpScanWidget
 from gui.tools.nl_gen_tool import NLGenWidget
 from gui.tools.troubleshoot_tool import TroubleshootWidget
 from gui.tools.lint_tool import LintWidget
@@ -90,6 +91,7 @@ class NetworkToolsWindow(QMainWindow):
             ("🛠️", "排错·重置命令", "只读排错 / 保存 / 重置 / 密码恢复速查", TroubleshootWidget),
             ("🧮", "子网计算器", "IP 子网划分、掩码换算、CIDR 计算", SubnetCalculatorWidget),
             ("🔔", "Ping 测试", "连通性检测、批量 Ping、Ping 扫描", PingTestWidget),
+            ("📡", "ARP 内网扫描", "活动设备：IP·MAC·厂商·姓名·虚拟 IP 冲突/ARP 欺骗检测", ArpScanWidget),
             ("🔍", "端口扫描", "TCP 端口开放检测、常见端口速查", PortScanWidget),
             ("🛤️", "路由跟踪", "Traceroute 路径追踪与逐跳延迟", TraceRouteWidget),
             ("🌐", "DNS / Whois", "域名解析、反向 DNS、备案信息", DNSToolWidget),
