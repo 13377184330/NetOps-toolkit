@@ -135,6 +135,32 @@ def is_virtual_mac(mac: str) -> bool:
     return oui in VIRTUAL_OUI
 
 
+# 网络设备厂商 OUI（交换机/路由器等，值得纳管到设备清单）
+_NETWORK_DEVICE_OUIS = set()
+for _ouis in (
+        ("001A2C", "001A2D", "002568", "00E0FC"),                # Huawei
+        ("001E10", "000FE2", "001FC6"),                          # H3C
+        ("00000C", "001007", "0018BA", "001C0D", "00234E", "002414"),  # Cisco
+        ("002719", "00268C", "002902", "0023EB", "001C44"),      # ZTE
+        ("001D09", "001F12", "00226F", "002283", "002319", "0026BB"),  # Juniper
+        ("00055B", "000D88", "001195", "001346", "0015E9",
+         "00179A", "001B11", "001CF6", "001E58"),                # D-Link
+        ("002275", "0023CD", "002522", "0026C6", "0050DA"),      # TP-Link
+        ("001B63", "000FB5", "00146C", "00184D", "001E2A",
+         "001F33", "00223F", "0024B2", "008EF2")):               # Netgear
+    _NETWORK_DEVICE_OUIS.update(_ouis)
+
+
+def network_vendor(mac: str) -> str:
+    """OUI 命中网络设备厂商 → 返回厂商名；否则空"""
+    if mac_kind(mac) != "normal":
+        return ""
+    oui = clean_mac(mac).replace(":", "")[:6]
+    if oui in _NETWORK_DEVICE_OUIS:
+        return LOCAL_OUI.get(oui, "")
+    return ""
+
+
 # ---------------- 控制台编码（chcp 检测，模块级缓存） ----------------
 
 _CONSOLE_ENC_CACHE = []
@@ -775,6 +801,8 @@ def scan(cidr: str = "", workers: int = 100, ping_timeout: int = 1,
             d["tags"].append("组播MAC")
         if is_virtual_mac(row["mac"]):
             d["tags"].append("虚拟机")
+        elif network_vendor(row["mac"]):
+            d["tags"].append("疑似网络设备")
         devices.append(d)
 
     # 本机自己不会出现在 ARP 缓存（自己不解析自己），从网卡信息补上
@@ -879,6 +907,114 @@ def scan(cidr: str = "", workers: int = 100, ping_timeout: int = 1,
         "partial": partial,
     }
     return result
+
+
+# ---------------- 联动：交换机采集 ARP 表合并 ----------------
+
+def merge_switch_arp(devices: list, switch_arp_rows: list) -> dict:
+    """把 Console 采集的交换机 ARP 表（cv.parse_arp 输出，mac 为 12 位小写 hex）
+    合并进设备列表，就地修改并返回统计。
+
+    价值：交换机视角覆盖多 VLAN 且是权威侧（网关侧）——
+    * 交换机 ARP 里有、本机扫描没有 → 新设备（跨段终端，本机视角看不见）
+    * 同 IP 交换机视角 MAC ≠ 本机视角 MAC → 合并后 analyze 直接报 IP 冲突/ARP 欺骗
+    * 已有同 (ip, mac) → 打「交换机证实」标注（本机结论被权威侧背书）
+    """
+    added = updated = 0
+    seen = {(d["ip"], d["mac"]) for d in devices}
+    for row in switch_arp_rows or []:
+        ip = (row.get("ip") or "").strip()
+        mac = clean_mac(row.get("mac") or "")
+        if not ip or not mac or not _valid_ip(ip):
+            continue
+        key = (ip, mac)
+        if key in seen:
+            for d in devices:
+                # 只给「本机视角发现」的设备打背书标；「交换机视角」来源的
+                # 设备本身就出自交换机，自己不能证实自己（重复导入幂等靠它）
+                if (d["ip"], d["mac"]) == key and "交换机证实" not in d["tags"] \
+                        and d.get("arp_type") != "switch":
+                    d["tags"].append("交换机证实")
+                    updated += 1
+            continue
+        seen.add(key)
+        d = {
+            "ip": ip, "mac": mac, "arp_type": "switch",
+            "vendor": lookup_vendor(mac), "hostname": "",
+            "name": "", "note": "", "tags": ["交换机视角"],
+        }
+        kind = mac_kind(mac)
+        if kind == "locally":
+            d["tags"].append("随机化MAC")
+        if is_virtual_mac(mac):
+            d["tags"].append("虚拟机")
+        elif network_vendor(mac):
+            d["tags"].append("疑似网络设备")
+        hit = match_roster(ip=ip, mac=mac)
+        d["name"] = hit.get("name", "")
+        d["note"] = hit.get("note", "")
+        devices.append(d)
+        added += 1
+    devices.sort(key=lambda d: _ip_sort_key(d["ip"]))
+    return {"added": added, "updated": updated}
+
+
+# ---------------- 联动：IPAM 同步 ----------------
+
+def sync_to_ipam(cidr: str, devices: list) -> dict:
+    """扫描结果一键同步到 IPAM 小账本（数据闭环：发现的活动 IP 批量标记已用）。
+
+    规则：
+    * 网段未登记 → 自动登记（名称「ARP 扫描导入」，后续可改名）
+    * IP 不在该网段内 → 跳过（跨段设备不属于本网段账本）
+    * IPAM 已有的已用 IP → 跳过（不覆盖用户手写的用途备注）
+    """
+    from modules import ipam
+
+    net_str = ipam.normalize_subnet(cidr)
+    if not net_str:
+        return {"ok": False, "error": f"网段格式不正确：{cidr}"}
+    net = None
+    try:
+        net = ipaddress.ip_network(net_str)
+    except ValueError:
+        pass
+    subs = {s["subnet"]: s for s in ipam.list_subnets()}
+    subnet_created = False
+    if net_str not in subs:
+        r = ipam.add_subnet(net_str, name="ARP 扫描导入")
+        if not r.get("ok"):
+            # 并发下可能刚好被登记——重新查一次拿记录
+            subs = {s["subnet"]: s for s in ipam.list_subnets()}
+            if net_str not in subs:
+                return {"ok": False, "error": r.get("error", "网段登记失败")}
+        else:
+            subnet_created = True
+    rec = subs.get(net_str) or next(
+        (s for s in ipam.list_subnets() if s["subnet"] == net_str), None)
+    if rec is None:
+        return {"ok": False, "error": "IPAM 网段记录获取失败"}
+    used = {u.get("ip") for u in rec.get("used", [])}
+    marked = skipped = 0
+    for d in devices:
+        ip = d.get("ip", "")
+        if not ip or ip in used:
+            if ip:
+                skipped += 1
+            continue
+        if net is not None:
+            try:
+                if ipaddress.ip_address(ip) not in net:
+                    continue   # 跨段设备不记到本网段
+            except ValueError:
+                continue
+        # 备注优先级：姓名 > 主机名 > 厂商；全空给 MAC 便于追溯
+        note = d.get("name") or d.get("hostname") or d.get("vendor") or d.get("mac", "")
+        ipam.mark_ip(net_str, ip, note)
+        used.add(ip)
+        marked += 1
+    return {"ok": True, "subnet": net_str, "subnet_created": subnet_created,
+            "marked": marked, "skipped": skipped}
 
 
 if __name__ == "__main__":

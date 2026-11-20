@@ -28,7 +28,7 @@ from gui.tool_styles import (
     TOOL_STATUS_SUCCESS, TOOL_STATUS_ERROR, TOOL_STATUS_INFO, TOOL_STATUS_WARNING,
     apply_tool_style,
 )
-from gui.dialogs.base import warn_box
+from gui.dialogs.base import info_box, warn_box
 from gui.widget_utils import polish_table
 
 
@@ -76,6 +76,8 @@ class ArpScanWidget(QWidget):
         self.worker = None
         self._devices = {}      # (ip, mac) -> device dict（本页当前展示集）
         self._row_index = {}    # (ip, mac) -> 行号（upsert 用，防重复插入）
+        self._last_cidr = ""    # 最近一次完成扫描的网段（IPAM 同步用）
+        self._last_gateway = "" # 最近一次扫描的网关 IP（风险重算用）
         self.initUI()
         self.refresh_adapters()
 
@@ -153,9 +155,26 @@ class ArpScanWidget(QWidget):
         lay.addWidget(set_group)
 
         # ---- 设备表 ----
-        dev_group = QGroupBox("活动设备（右键：登记姓名 / Ping / 复制 / 导出）")
+        dev_group = QGroupBox("活动设备（右键：登记姓名 / 存入设备清单 / Ping / 复制 / 导出）")
         dev_lay = QVBoxLayout(dev_group)
         dev_lay.setSpacing(6)
+
+        # 联动按钮行：与 IPAM 小账本 / Console 采集数据打通（能读到的信息不让
+        # 人在另一个页面手工抄一遍）
+        link_row = QHBoxLayout()
+        link_row.setSpacing(8)
+        self.ipam_btn = QPushButton("📥 同步到 IPAM")
+        self.ipam_btn.setStyleSheet(TOOL_BUTTON_SECONDARY)
+        self.ipam_btn.setToolTip("把发现的全部活动 IP 批量标记为已用（网段未登记会自动登记；\nIPAM 已有的不动，不覆盖你手写的用途备注）")
+        self.ipam_btn.clicked.connect(self.sync_to_ipam)
+        link_row.addWidget(self.ipam_btn)
+        self.switch_btn = QPushButton("🖧 交换机采集导入")
+        self.switch_btn.setStyleSheet(TOOL_BUTTON_SECONDARY)
+        self.switch_btn.setToolTip("复用 Console 可视化页最近一次采集的 ARP 表（交换机=网关侧权威视角，\n覆盖多 VLAN）：新设备合并入表标「交换机视角」，已发现的标「交换机证实」，\n同 IP 双侧 MAC 不一致自动报冲突/欺骗")
+        self.switch_btn.clicked.connect(self.import_switch_arp)
+        link_row.addWidget(self.switch_btn)
+        link_row.addStretch()
+        dev_lay.addLayout(link_row)
         self.device_table = QTableWidget(0, 7)
         polish_table(self.device_table)
         self.device_table.setHorizontalHeaderLabels(
@@ -163,7 +182,7 @@ class ArpScanWidget(QWidget):
         _h = self.device_table.horizontalHeader()
         _h.setSectionResizeMode(QHeaderView.ResizeToContents)
         _h.setSectionResizeMode(0, QHeaderView.Stretch)
-        _h.setSectionResizeMode(4, QHeaderView.Stretch)
+        _h.setMinimumSectionSize(56)   # 空内容列不发丝级收窄
         self.device_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.device_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.device_table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -209,6 +228,8 @@ class ArpScanWidget(QWidget):
         _rh = self.roster_table.horizontalHeader()
         _rh.setSectionResizeMode(QHeaderView.ResizeToContents)
         _rh.setSectionResizeMode(0, QHeaderView.Stretch)
+        # 空表时 ResizeToContents 会收得太窄，后续填数据折行——给段宽下限
+        _rh.setMinimumSectionSize(110)
         self.roster_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.roster_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.roster_table.setMaximumHeight(150)
@@ -266,6 +287,8 @@ class ArpScanWidget(QWidget):
         if not cidr:
             warn_box(self, "提示", "请填写要扫描的网段，或选择一块网卡自动填充")
             return
+        self._last_cidr = ""
+        self._last_gateway = ""
         self.scan_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self._devices.clear()
@@ -329,6 +352,8 @@ class ArpScanWidget(QWidget):
     def on_finished(self, result):
         self.scan_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self._last_cidr = result.get("cidr", "")
+        self._last_gateway = result.get("gateway", "")
         self._reorder_by_ip()
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
@@ -391,6 +416,121 @@ class ArpScanWidget(QWidget):
         else:
             self.risk_label.setStyleSheet(TOOL_STATUS_WARNING)
 
+    # ================= 项目联动（不再独立：设备清单 / IPAM / Console 采集） =================
+    @staticmethod
+    def _find_main_window():
+        """工具箱是独立窗口，从顶层窗口里按鸭子特征找主窗口（有设备运维/Console
+        可视化两个页签实例的窗口）；找不到返回 None。不直接 import 主窗口模块——
+        避免工具箱加载时连带拉起全部页签依赖。"""
+        from PyQt5.QtWidgets import QApplication
+        for w in QApplication.topLevelWidgets():
+            tabs = getattr(w, "tabs", None)
+            if isinstance(tabs, dict) and ("device_ops" in tabs or "console_viz" in tabs):
+                return w
+        return None
+
+    def _save_to_device_list(self, ip: str, mac: str):
+        """右键「存入设备清单」：能读到的信息预填（IP/名称/厂商/备注），
+        人只补 SSH 凭据——与 Console 采集「存入设备清单」同款模式"""
+        main = self._find_main_window()
+        if main is None or "device_ops" not in (getattr(main, "tabs", {}) or {}):
+            info_box(self, "存入设备清单",
+                     "未找到主窗口的设备运维页。\n\n请从主窗口打开工具箱后重试。")
+            return
+        d = self._devices.get((ip, mac), {})
+        vendor_name = d.get("vendor", "") or arp_scan.network_vendor(mac)
+        # ARP OUI 厂商名 → 设备清单厂商 key（不在五厂商内的不预填，留给用户选）
+        vendor_key = {"Huawei": "huawei", "H3C": "h3c", "Cisco": "cisco"}.get(vendor_name, "huawei")
+        pre_name = d.get("name") or d.get("hostname") \
+            or (f"{vendor_name}设备" if vendor_name else "未命名设备")
+        pre = {"name": pre_name, "ip": ip, "vendor": vendor_key, "model": "",
+               "role": "access",
+               "notes": f"ARP 扫描发现（MAC {mac}）"}
+        ops = main.tabs["device_ops"]
+        if any(dev.get("name") == pre["name"] and dev.get("ip") == pre["ip"]
+               for dev in ops.store.list_all()):
+            info_box(self, "存入设备清单",
+                     f"设备 {pre['name']}（{pre['ip']}）已在清单中，未重复登记。")
+            return
+        from gui.tabs.device_ops_tab import DeviceDialog
+        dlg = DeviceDialog(pre, parent=self)
+        if not dlg.exec_():
+            return
+        data = dlg.data()
+        if not data["name"] or not data["ip"]:
+            warn_box(self, "提示", "设备名称和管理 IP 必填")
+            return
+        ops.store.add(data)
+        ops.refresh_table()
+        self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
+        self.status_bar.setText(f"✅ 已存入设备清单：{data['name']}（{data['ip']}），"
+                                "可在「设备运维」页测试 SSH / 执行命令 / 备份")
+
+    def import_switch_arp(self):
+        """复用 Console 可视化页最近一次采集的交换机 ARP 表：
+        交换机 = 网关侧权威视角（display arp all 覆盖多 VLAN），与本机扫描结果
+        合并对比——新设备标「交换机视角」，已有设备标「交换机证实」，
+        同 IP 双侧 MAC 不一致自动重算出冲突/欺骗"""
+        main = self._find_main_window()
+        cv_tab = (getattr(main, "tabs", {}) or {}).get("console_viz") if main else None
+        if cv_tab is None:
+            info_box(self, "交换机采集导入",
+                     "未找到主窗口的 Console 可视化页。\n\n请从主窗口打开工具箱，"
+                     "并先在「Console 可视化」页连接交换机做一次采集。")
+            return
+        res = getattr(cv_tab, "_last_result", None)
+        if not res or not (res.get("arp") or "").strip():
+            info_box(self, "交换机采集导入",
+                     "Console 可视化页还没有采集到 ARP 表。\n\n请先在该页连接交换机"
+                     "点「连接并读取配置」（四表联采含 ARP 表和 MAC 表）。")
+            return
+        from modules import config_visualizer as cv
+        rows = cv.parse_arp(res.get("arp") or "")
+        if not rows:
+            info_box(self, "交换机采集导入",
+                     "交换机 ARP 表解析不出有效条目（采集数据可能不是 ARP 表）。")
+            return
+        if self.worker and self.worker.isRunning():
+            warn_box(self, "提示", "扫描进行中，请等扫描完成后再导入")
+            return
+        dev_list = list(self._devices.values())
+        stat = arp_scan.merge_switch_arp(dev_list, rows)
+        # 合并后同步回本页索引并重绘
+        self._devices = {(d["ip"], d["mac"]): d for d in dev_list}
+        self._reorder_by_ip()
+        # 重算风险（跨视角同 IP 多 MAC → 冲突/欺骗；不重抹网关基线）
+        gw = self._last_gateway
+        prev = ""
+        if gw:
+            prev = arp_scan.load_gateway_history().get("gateways", {}).get(gw, {}).get("mac", "")
+        risks = arp_scan.analyze(dev_list, gateway_ip=gw, prev_gateway_mac=prev)
+        self._render_risks(risks)
+        self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
+        self.status_bar.setText(f"✅ 已合并交换机 ARP 表：新增 {stat['added']} 台"
+                                f"（标「交换机视角」）、背书 {stat['updated']} 台，"
+                                f"共 {len(dev_list)} 台，风险已重算")
+
+    def sync_to_ipam(self):
+        """扫描结果一键同步到 IPAM 小账本：发现的全部活动 IP 批量标记已用"""
+        if not self._devices:
+            info_box(self, "同步到 IPAM", "当前没有设备数据，请先完成一次扫描再同步。")
+            return
+        cidr = self._last_cidr or self.cidr_edit.text().strip()
+        if not cidr or "/" not in cidr:
+            info_box(self, "同步到 IPAM",
+                     "缺少网段信息（扫描完成后自动记录，也可在上方网段框填写）。")
+            return
+        r = arp_scan.sync_to_ipam(cidr, list(self._devices.values()))
+        if not r.get("ok"):
+            self.status_bar.setStyleSheet(TOOL_STATUS_ERROR)
+            self.status_bar.setText(f"❌ 同步 IPAM 失败：{r.get('error', '')}")
+            return
+        self.status_bar.setStyleSheet(TOOL_STATUS_SUCCESS)
+        created = "（网段已自动登记）" if r.get("subnet_created") else ""
+        self.status_bar.setText(
+            f"✅ 已同步 IPAM{created}：新标记已用 {r['marked']} 个 IP、"
+            f"已有跳过 {r['skipped']} 个（不覆盖备注）——可在工具箱「IPAM 小账本」查看")
+
     # ================= 右键菜单 =================
     def _ctx_menu(self, pos):
         row = self.device_table.rowAt(pos.y())
@@ -404,11 +544,12 @@ class ArpScanWidget(QWidget):
         mac = mac_it.text() if mac_it else ""
         menu = QMenu(self)
         act_reg = QAction("📝 登记姓名（预填名册行）", menu)
+        act_dev = QAction("➕ 存入设备清单（预填 IP/名称，补 SSH 凭据）", menu)
         act_ping = QAction(f"🔔 Ping 此 IP", menu)
         act_copy_ip = QAction("复制 IP", menu)
         act_copy_mac = QAction("复制 MAC", menu)
         act_csv = QAction("📄 导出设备清单 CSV", menu)
-        for a in (act_reg, act_ping, act_copy_ip, act_copy_mac, act_csv):
+        for a in (act_reg, act_dev, act_ping, act_copy_ip, act_copy_mac, act_csv):
             menu.addAction(a)
         chosen = menu.exec_(self.device_table.viewport().mapToGlobal(pos))
         if chosen is None:
@@ -419,6 +560,8 @@ class ArpScanWidget(QWidget):
             self.ros_name_edit.setFocus()
             self.roster_hint.setText("已预填，请补姓名后点「登记」。")
             self.roster_hint.setStyleSheet(TOOL_STATUS_INFO)
+        elif chosen == act_dev:
+            self._save_to_device_list(ip, "" if mac == "—" else mac)
         elif chosen == act_ping:
             self._ping_one(ip)
         elif chosen == act_copy_ip:
