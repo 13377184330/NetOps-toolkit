@@ -1356,17 +1356,23 @@ class NetworkTopologyPage(QWidget):
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         self.detail_body = QWidget()
         self.detail_body.setStyleSheet("background: transparent;")
-        self._detail_form = QFormLayout(self.detail_body)
-        self._detail_form.setContentsMargins(0, 8, 0, 8)
+        # 参数行 + 操作按钮一起放进滚动区：原来按钮在 scroll 外，窗口一变小
+        # 主布局空间不足，按钮被压到 8px（文字 19px）→ 上下折叠裁切。
+        # 移进滚动区后空间不足就滚动，按钮保持 sizeHint 高度。
+        body_lay = QVBoxLayout(self.detail_body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(10)
+        self._detail_form = QFormLayout()
+        self._detail_form.setContentsMargins(0, 8, 0, 0)
         self._detail_form.setHorizontalSpacing(14)
         self._detail_form.setVerticalSpacing(8)
-        scroll.setWidget(self.detail_body)
-        lay.addWidget(scroll, 1)
-
+        body_lay.addLayout(self._detail_form)
         self.detail_btn_col = QVBoxLayout()
         self.detail_btn_col.setSpacing(8)
-        lay.addLayout(self.detail_btn_col)
-        lay.addStretch()
+        body_lay.addLayout(self.detail_btn_col)
+        body_lay.addStretch()
+        scroll.setWidget(self.detail_body)
+        lay.addWidget(scroll, 1)
         return panel
 
     def _clear_detail_body(self):
