@@ -6,7 +6,7 @@
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QStackedWidget, QScrollArea, QFrame, QPushButton,
-                             QTabWidget, QLabel, QMessageBox, QStatusBar)
+                             QTabWidget, QLabel, QMessageBox, QStatusBar, QSizePolicy)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPainter, QColor, QCursor
 
@@ -204,6 +204,11 @@ class NetworkToolsWindow(QMainWindow):
         lay.addLayout(col, 1)
         arrow = QLabel("›")
         arrow.setStyleSheet("font-size: 20px; color: #B7C3D4; background: transparent;")
+        # 不设固定宽度时，伸展布局会把箭头挤到 7px，`›` 被逐字竖排折成
+        # 一串小箭头（视觉上像字被上下折叠）。固定宽度 + 不换行 + 居中。
+        arrow.setFixedWidth(16)
+        arrow.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        arrow.setAlignment(Qt.AlignVCenter | Qt.AlignHCenter)
         lay.addWidget(arrow)
         # 点击气泡内的子控件不会吞事件（QLabel 默认透明）
         for w in (ic, n, d, arrow):
