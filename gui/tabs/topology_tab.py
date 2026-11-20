@@ -1503,11 +1503,25 @@ class NetworkTopologyPage(QWidget):
             self.live_btn.setText("实时: 开")
             self._sys_live_note("实时刷新已开启（30s 一轮，只读；采集/下发期间自动让路）")
         else:
-            if self._live_timer is not None:
-                self._live_timer.stop()
-                self._live_timer = None
+            self._stop_live()
             self.live_btn.setText("实时: 关")
             self._sys_live_note("实时刷新已关闭")
+
+    def _stop_live(self):
+        """停止实时刷新：停 timer + 等当前轮询线程结束（关窗/关闭开关必调）。
+        裸 QThread 存活时被 GC 析构会直接原生崩溃（terminal 页同型雷的已验证修法）。"""
+        timer = getattr(self, "_live_timer", None)
+        if timer is not None:
+            timer.stop()
+            self._live_timer = None
+        w = getattr(self, "_live_worker", None)
+        if w is not None:
+            try:
+                w.wait(3000)          # 串口读秒级返回；超时也不无限阻塞关窗
+            except Exception:
+                pass
+            self._live_worker = None
+        self._live_busy = False
 
     def _sys_live_note(self, text):
         """实时刷新状态打到拓扑底部提示行（不打断主状态）"""
@@ -1526,6 +1540,12 @@ class NetworkTopologyPage(QWidget):
         cn2key = {"华为": "huawei", "H3C": "h3c", "锐捷": "ruijie", "迈普": "maipu", "思科": "cisco"}
         vkey = cn2key.get(vendor) or vendor or "h3c"
         self._live_busy = True
+        # 上一轮线程若仍在收尾（finished 未回收）先等它，避免引用被覆盖后
+        # running QThread 被 GC 析构（原生崩溃）
+        old = getattr(self, "_live_worker", None)
+        if old is not None and old.isRunning():
+            self._live_busy = False
+            return
         self._live_worker = _LiveRefreshWorker(port, vkey)
 
         def _on_live(ok, link):

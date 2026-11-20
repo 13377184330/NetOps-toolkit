@@ -504,6 +504,20 @@ class MainWindow(QMainWindow):
                 term.shutdown()
         except Exception:
             pass
+        # 拓扑实时刷新可能持有串口轮询线程（裸 QThread）：退出前停流 + 等线程结束
+        try:
+            topo = self.tabs.get("topology")
+            if topo is not None and hasattr(topo, "_stop_live"):
+                topo._stop_live()
+        except Exception:
+            pass
+        # AI 运维页后台线程（流式/下发/读取/抓取/批量）退出前收尾
+        try:
+            ai = self.tabs.get("ai_ops")
+            if ai is not None and hasattr(ai, "shutdown"):
+                ai.shutdown()
+        except Exception:
+            pass
         super().closeEvent(event)
 
     # 全宽独占页集合（无右侧预览、无配置操作按钮）

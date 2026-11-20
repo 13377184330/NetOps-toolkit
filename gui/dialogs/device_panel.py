@@ -398,14 +398,18 @@ class DevicePanelDialog(BaseDialog):
         except RuntimeError:
             pass                                   # 拓扑已重建（节点销毁后 C++ 对象失效）
 
-    def done(self, r):
-        self._clear_topology_link()
-        super().done(r)
-
     def closeEvent(self, ev):
-        # QDialog 关闭路径与 reject/accept 路径互不重叠，两处都还原高亮
+        # QDialog 关闭路径与 reject/accept 路径互不重叠，两处都要：
+        # ① 还原拓扑联动高亮 ② 停掉 2s 端口轮询（close 不销毁对象，
+        #    不停则面板关后 timer 永续空转，反复开关面板会累积多个 timer）
+        self._live_timer.stop()
         self._clear_topology_link()
         super().closeEvent(ev)
+
+    def done(self, r):
+        self._live_timer.stop()
+        self._clear_topology_link()
+        super().done(r)
 
     # ---------------- 命令生成 ----------------
     def _rebuild_preview(self):

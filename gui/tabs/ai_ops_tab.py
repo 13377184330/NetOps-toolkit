@@ -281,6 +281,26 @@ class AIOpsTab(QWidget):
         self._compact_cards = False # 多于30条自动切紧凑模式
         self.initUI()
 
+    def shutdown(self):
+        """退出前收尾：后台线程（流式/下发/读取/抓取/批量）都是阻塞网络调用，
+        运行中对象被 GC 析构会原生崩溃（QThread destroyed while running）。
+        优雅等待 3s，超时 terminate 兜底（仅退出路径；网络 IO 被终止无资源破坏，
+        socket 随进程退出释放）。"""
+        for attr in ("_stream_worker", "_send_worker", "_read_worker",
+                     "_fetch_worker", "_backup_worker", "_batch_worker"):
+            w = getattr(self, attr, None)
+            if w is None:
+                continue
+            try:
+                if w.isRunning():
+                    w.wait(3000)
+                    if w.isRunning():
+                        w.terminate()
+                        w.wait(1000)
+            except Exception:
+                pass
+            setattr(self, attr, None)
+
     # ---------------------------------------------------------------- 布局
     def initUI(self):
         lay = QVBoxLayout(self)

@@ -276,10 +276,14 @@ class TerminalTab(QWidget):
         self.cmd_input.clear()
 
     def shutdown(self):
-        """主窗口关闭时调用：停止终端线程、释放串口"""
+        """主窗口关闭时调用：停止终端线程、释放串口。
+        wait 超时后 terminate 兜底——运行中的 QThread 对象被 GC 析构会原生崩溃。"""
         if self._worker is not None:
             self._worker.request_stop()
             self._worker.wait(3000)
+            if self._worker.isRunning():
+                self._worker.terminate()
+                self._worker.wait(1000)
             self._worker = None
             self._connected = False
 
